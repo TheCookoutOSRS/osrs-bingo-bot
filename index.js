@@ -432,31 +432,51 @@ client.on("interactionCreate", async (i) => {
   }
 
   if (i.commandName === "bingo-mark") {
-    if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild))
-      return i.reply({ flags: 64, content: "Need Manage Server permission." });
+  try {
+    await i.deferReply({ flags: 64 }); // ACK immediately (ephemeral)
+
+    if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+      return i.editReply("Need Manage Server permission.");
+    }
+
     const key  = i.options.getString("tilekey");
     const rsn  = i.options.getString("rsn");
     const team = i.options.getString("team");
-    const tile = data.tiles.find(t => t.key === key);
-    if (!tile) return i.reply({ flags: 64, content: "Unknown tile key." });
 
-    const bucket = ensureTeamBucket(team);
+    console.log("[/bingo-mark]", { key, rsn, team });
+
+    const tile = data.tiles.find(t => t.key === key);
+    if (!tile) return i.editReply("Unknown tile key.");
+
+    // ensure team bucket + mark complete
+    ensureTeamBucket(team);
     const e = ensureTileProgressForTeam(tile, team);
     e.done = true;
     e.by = { team, rsn, itemName: "(manual)", ts: Date.now() };
     saveData(data);
 
+    // announce + update that team's board
     if (bingoChannel) {
       const embed = new EmbedBuilder()
         .setTitle("Bingo Tile Completed! (Manual)")
-        .setDescription(`**${rsn}** (${team}) completed **${tile.name}**`)
+        .setDescription(`**${rsn}** completed **${tile.name}** for **${team}**`)
         .addFields({ name: "Tile Key", value: tile.key, inline: true })
         .setFooter({ text: "OSRS Bingo" });
+
       await bingoChannel.send({ embeds: [embed] });
       await postBoardImage(bingoChannel, team);
     }
-    return i.reply({ flags: 64, content: `Marked ${key} complete for **${team}**.` });
+
+    return i.editReply(`Marked \`${key}\` complete for **${team}**.`);
+  } catch (err) {
+    console.error("Error in /bingo-mark:", err);
+    // Always respond to avoid “did not respond”
+    if (!i.replied) {
+      try { await i.editReply("Something went wrong running /bingo-mark. Check logs."); } catch {}
+    }
   }
+}
+
 
   if (i.commandName === "bingo-setteam") {
     if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild))
