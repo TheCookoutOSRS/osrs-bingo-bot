@@ -371,26 +371,46 @@ client.on("interactionCreate", async (i) => {
   if (!i.isChatInputCommand()) return;
 
   if (i.commandName === "bingo-setchannel") {
+  try {
+    await i.deferReply({ flags: 64 });
+
     if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild))
-      return i.reply({ flags: 64, content: "Need Manage Server permission." });
+      return i.editReply("Need Manage Server permission.");
+
     const ch = i.options.getChannel("channel");
     bingoChannel = ch;
     data.channelId = ch.id;
     saveData(data);
-    return i.reply(`Bingo drops channel set to ${ch}`);
+    return i.editReply(`Bingo drops channel set to ${ch}`);
+  } catch (err) {
+    console.error("Error in /bingo-setchannel:", err);
+    if (!i.replied) try { await i.editReply("Error setting channel."); } catch {}
   }
+}
+
 
   if (i.commandName === "bingo-password") {
-    return i.reply(
+  try {
+    await i.deferReply({ flags: 64 });
+    await i.editReply(
       `The bingo password is: **${PASSWORD}** (active starting <t:${Math.floor(
         START_TIME.getTime() / 1000
       )}:F>)`
     );
+  } catch (err) {
+    console.error("Error in /bingo-password:", err);
+    if (!i.replied) try { await i.editReply("Error showing password."); } catch {}
   }
+}
+
 
   if (i.commandName === "bingo-status") {
-    const team = i.options.getString("team").trim();
-    if (!team) return i.reply({ flags: 64, content: "Team is required." });
+  try {
+    await i.deferReply({ flags: 64 }); // ephemeral
+
+    const team = i.options.getString("team")?.trim();
+    if (!team) return i.editReply("Team is required.");
+
     const bucket = data.completedByTeam?.[team] || {};
     const total = data.tiles.length;
     const done = data.tiles.filter(t => bucket[t.key]?.done).length;
@@ -420,16 +440,29 @@ client.on("interactionCreate", async (i) => {
       return `• ✅ ${t.key}: ${t.name} — by ${c.by?.rsn} (${team})`;
     }).slice(0, 25);
 
-    return i.reply({ flags: 64, content: `**${team}** Progress: ${done}/${total}\n` + lines.join("\n") });
+    return i.editReply({ content: `**${team}** Progress: ${done}/${total}\n` + lines.join("\n") });
+  } catch (err) {
+    console.error("Error in /bingo-status:", err);
+    if (!i.replied) try { await i.editReply("Error building status. Check logs."); } catch {}
   }
+}
+
 
   if (i.commandName === "bingo-board") {
-    const team = i.options.getString("team").trim();
-    if (!team) return i.reply({ flags: 64, content: "Team is required." });
-    await i.deferReply({ flags: 64 });
+  try {
+    await i.deferReply({ flags: 64 }); // ephemeral
+
+    const team = i.options.getString("team")?.trim();
+    if (!team) return i.editReply("Team is required.");
+
     await postBoardImage(i.channel, team, `Current Bingo Board — **${team}**`);
     return i.editReply("Board posted.");
+  } catch (err) {
+    console.error("Error in /bingo-board:", err);
+    if (!i.replied) try { await i.editReply("Error generating board image."); } catch {}
   }
+}
+
 
   if (i.commandName === "bingo-mark") {
   try {
@@ -479,17 +512,25 @@ client.on("interactionCreate", async (i) => {
 
 
   if (i.commandName === "bingo-setteam") {
+  try {
+    await i.deferReply({ flags: 64 });
+
     if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild))
-      return i.reply({ flags: 64, content: "Need Manage Server permission." });
-    const rsn = i.options.getString("rsn").trim();
-    const team = i.options.getString("team").trim();
-    if (!rsn || !team) {
-      return i.reply({ flags: 64, content: "Both RSN and Team are required." });
-    }
+      return i.editReply("Need Manage Server permission.");
+
+    const rsn = i.options.getString("rsn")?.trim();
+    const team = i.options.getString("team")?.trim();
+    if (!rsn || !team) return i.editReply("Both RSN and Team are required.");
+
     data.rsnToTeam[rsn] = team;
     saveData(data);
-    return i.reply({ flags: 64, content: `Assigned **${rsn}** to **${team}**.` });
+    return i.editReply(`Assigned **${rsn}** to **${team}**.`);
+  } catch (err) {
+    console.error("Error in /bingo-setteam:", err);
+    if (!i.replied) try { await i.editReply("Error setting team."); } catch {}
   }
+}
+
 
   if (i.commandName === "bingo-teams") {
     const entries = Object.entries(data.rsnToTeam || {});
