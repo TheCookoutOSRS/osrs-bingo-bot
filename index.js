@@ -284,16 +284,16 @@ async function renderBoardBuffer(teamLabel) {
 }
 async function postBoardImage(targetChannel, teamLabel, note = "") {
   const ch = targetChannel || bingoChannel;
-  if (!ch) {
-    console.warn("[BOARD] No channel to post to. Set with /bingo-setchannel.");
-    return;
+  if (!ch) { console.warn("[BOARD] No channel to post to."); return; }
+  try {
+    const buf = await renderBoardBuffer(teamLabel);
+    await ch.send({ content: note || "", files: [{ attachment: buf, name: `bingo_${teamLabel.replace(/\s+/g,'_')}.png` }] });
+  } catch (e) {
+    console.error("[BOARD] Failed to send image:", e);
+    throw e; // so the handler shows a clear error
   }
-  const buf = await renderBoardBuffer(teamLabel);
-  await ch.send({
-    content: note || "",
-    files: [{ attachment: buf, name: `bingo_${teamLabel.replace(/\s+/g,'_')}.png` }]
-  });
 }
+
 
 // --- Discord client ---
 const client = new Client({
@@ -450,18 +450,25 @@ client.on("interactionCreate", async (i) => {
 
   if (i.commandName === "bingo-board") {
   try {
-    await i.deferReply({ flags: 64 }); // ephemeral
+    await i.deferReply({ flags: 64 }); // ephemeral ack
 
     const team = i.options.getString("team")?.trim();
     if (!team) return i.editReply("Team is required.");
 
-    await postBoardImage(i.channel, team, `Current Bingo Board — **${team}**`);
-    return i.editReply("Board posted.");
+    // Render buffer directly and attach it to the reply
+    const buf = await renderBoardBuffer(team);
+    await i.editReply({
+      content: `Current Bingo Board — **${team}**`,
+      files: [{ attachment: buf, name: `bingo_${team.replace(/\s+/g,'_')}.png` }]
+    });
   } catch (err) {
     console.error("Error in /bingo-board:", err);
-    if (!i.replied) try { await i.editReply("Error generating board image."); } catch {}
+    if (!i.replied) {
+      try { await i.editReply("Error generating board image."); } catch {}
+    }
   }
 }
+
 
 
   if (i.commandName === "bingo-mark") {
