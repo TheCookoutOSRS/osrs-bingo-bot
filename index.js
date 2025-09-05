@@ -13,6 +13,7 @@ import {
   EmbedBuilder,
   PermissionsBitField,
 } from "discord.js";
+import { createCanvas } from "canvas";
 
 const app = express();
 app.use(bodyParser.json());
@@ -40,9 +41,9 @@ function loadData() {
       DATA_PATH,
       JSON.stringify(
         {
-          rsnToTeam: {},   // { "RSN": "Team A" }
-          tiles: [],       // populated by your bingo.json
-          completed: {},   // { tileKey: { done: true, by: {...}, progress: {...} } }
+          rsnToTeam: {},
+          tiles: [],
+          completed: {},
           channelId: ""
         },
         null, 2
@@ -56,43 +57,35 @@ function saveData(d) {
 }
 let data = loadData();
 
-// --- Helpers ---
+// ------- Helpers for tiles -------
 const norm = (s) => (s || "").toLowerCase().replace(/\s+/g, " ").trim();
 
-// Match an itemName against one tile's rules
 function matchTile(tile, itemName) {
-  const n = norm(itemName);
+  if (!tile || !itemName) return false;
 
   if (tile.type === "single") {
     return tile.matches.some(rx => new RegExp(rx, "i").test(itemName));
   }
 
   if (tile.type === "anyCount") {
-    // “Get N of any from this list (duplicates allowed)”
     return tile.sources.some(rx => new RegExp(rx, "i").test(itemName));
   }
 
   if (tile.type === "setAll") {
-    // We only return true if this specific drop is part of the set
     return tile.set.some(rx => new RegExp(rx, "i").test(itemName));
   }
 
   if (tile.type === "orSetAll") {
-    // This drop belongs to either setA or setB
     return tile.sets.flat().some(rx => new RegExp(rx, "i").test(itemName));
   }
 
   if (tile.type === "orCount") {
-    // Either count X of sources[0] OR any of alternativeMatches
     const inCountGroup = tile.sources.some(rx => new RegExp(rx, "i").test(itemName));
     const inAlt = (tile.alternativeMatches || []).some(rx => new RegExp(rx, "i").test(itemName));
     return inCountGroup || inAlt;
   }
 
-  if (tile.type === "pet") {
-    // pet is always manual tonight (use /bingo-mark), but keep stub
-    return false;
-  }
+  if (tile.type === "pet") return false; // manual for now
 
   return false;
 }
@@ -115,7 +108,6 @@ function handleProgress(tile, team, rsn, itemName) {
   }
 
   if (tile.type === "anyCount") {
-    // Need N total from tile.sources
     entry.progress.total = (entry.progress.total || 0) + 1;
     entry.progress.perTeam[team] = (entry.progress.perTeam[team] || 0) + 1;
     if (entry.progress.total >= tile.count) {
@@ -127,7 +119,6 @@ function handleProgress(tile, team, rsn, itemName) {
   }
 
   if (tile.type === "setAll") {
-    // must collect all regexes from tile.set (unique members)
     if (!entry.sets.collected) entry.sets.collected = {};
     const matched = tile.set.find(rx => new RegExp(rx, "i").test(itemName));
     if (matched) entry.sets.collected[matched] = true;
@@ -142,7 +133,6 @@ function handleProgress(tile, team, rsn, itemName) {
   }
 
   if (tile.type === "orSetAll") {
-    // either entire sets[0] or sets[1]
     if (!entry.sets.A) entry.sets.A = {};
     if (!entry.sets.B) entry.sets.B = {};
 
@@ -164,7 +154,6 @@ function handleProgress(tile, team, rsn, itemName) {
   }
 
   if (tile.type === "orCount") {
-    // Option 1: get 'count' of sources; Option 2: get any of alternativeMatches
     const inCountGroup = tile.sources.some(rx => new RegExp(rx, "i").test(itemName));
     const inAlt = (tile.alternativeMatches || []).some(rx => new RegExp(rx, "i").test(itemName));
 
@@ -186,16 +175,109 @@ function handleProgress(tile, team, rsn, itemName) {
     }
   }
 
-  if (tile.type === "pet") {
-    // manual: handled by /bingo-mark
-    return false;
-  }
+  if (tile.type === "pet") return false;
 
   return false;
 }
 
 function findTeamByRSN(rsn) {
   return data.rsnToTeam?.[rsn] || "Unassigned";
+}
+
+// ------- Board rendering -------
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = (text || "").split(/\s+/);
+  let line = "";
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line ? line + " " + words[n] : words[n];
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > maxWidth && n > 0) {
+      ctx.fillText(line, x, y);
+      line = words[n];
+      y += lineHeight;
+    } else {
+      line = testLine;
+    }
+  }
+  ctx.fillText(line, x, y);
+}
+function getTileState(tile) {
+  const c = data.completed[tile.key];
+  return c && c.done ? "done" : "pending";
+}
+async function renderBoardBuffer() {
+  const size = 1000;       // image px
+  const grid = 5;
+  const titleH = 60;
+  const pad = 12;
+  const cell = size / grid;
+
+  const canvas = createCanvas(size, size);
+  const ctx = canvas.getContext("2d");
+
+  // Background & title
+  ctx.fillStyle = "#1f2937"; // slate-800
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = "#111827"; // slate-900
+  ctx.fillRect(0, 0, size, titleH);
+  ctx.fillStyle = "#e5e7eb"; // gray-200
+  ctx.font = "bold 28px Arial";
+  ctx.fillText("Fall Bingo Cookout", 20, 40);
+
+  // Grid cells
+  for (let i = 0; i < data.tiles.length; i++) {
+    const row = Math.floor(i / grid);
+    const col = i % grid;
+    const x = col * cell;
+    const y = row * cell + titleH;
+
+    const tile = data.tiles[i];
+    const state = tile?.inactive ? "inactive" : getTileState(tile);
+
+    // Cell background
+    if (tile?.inactive) {
+      ctx.fillStyle = "#000000";
+    } else {
+      ctx.fillStyle = state === "done" ? "#14532d" : "#374151"; // green-900 or gray-700
+    }
+    ctx.fillRect(x, y, cell, cell);
+
+    // Border
+    ctx.strokeStyle = "#9ca3af"; // gray-400
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, cell, cell);
+
+    // Text
+    if (tile) {
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "bold 18px Arial";
+      const textX = x + pad;
+      const textY = y + 28;
+      const maxWidth = cell - pad * 2;
+      wrapText(ctx, tile.name, textX, textY, maxWidth, 22);
+    }
+
+    // Checkmark overlay
+    if (!tile?.inactive && state === "done") {
+      ctx.strokeStyle = "#22c55e"; // green-500
+      ctx.lineWidth = 10;
+      ctx.beginPath();
+      ctx.moveTo(x + cell * 0.2, y + cell * 0.55);
+      ctx.lineTo(x + cell * 0.4, y + cell * 0.75);
+      ctx.lineTo(x + cell * 0.8, y + cell * 0.3);
+      ctx.stroke();
+    }
+  }
+
+  return canvas.toBuffer("image/png");
+}
+async function postBoardImage(note = "") {
+  if (!bingoChannel) return;
+  const buf = await renderBoardBuffer();
+  await bingoChannel.send({
+    content: note || "",
+    files: [{ attachment: buf, name: "bingo.png" }]
+  });
 }
 
 // --- Discord client ---
@@ -227,10 +309,7 @@ client.once("ready", async () => {
             ],
           },
           { name: "bingo-password", description: "Reveal the bingo password (and start time)" },
-          {
-            name: "bingo-status",
-            description: "Show completion summary for all tiles"
-          },
+          { name: "bingo-status", description: "Show completion summary for all tiles" },
           {
             name: "bingo-mark",
             description: "Manually mark a tile complete (e.g., PET/edge cases)",
@@ -244,15 +323,12 @@ client.once("ready", async () => {
             name: "bingo-setteam",
             description: "Assign an RSN to a team",
             options: [
-        { name: "rsn", type: 3, description: "Player RSN", required: true },
-        { name: "team", type: 3, description: "Team name (free text)", required: true }
-  ]
+              { name: "rsn", type: 3, description: "Player RSN", required: true },
+              { name: "team", type: 3, description: "Team name (free text)", required: true }
+            ]
           },
-          {
-          name: "bingo-teams",
-          description: "Show current RSN → Team assignments"
-        },
-
+          { name: "bingo-teams", description: "Show current RSN → Team assignments" },
+          { name: "bingo-board", description: "Post the current visual bingo board image" }
         ],
       }
     );
@@ -282,34 +358,6 @@ client.on("interactionCreate", async (i) => {
     saveData(data);
     return i.reply(`Bingo drops channel set to ${ch}`);
   }
-  if (i.commandName === "bingo-setteam") {
-  if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-    return i.reply({ content: "Need Manage Server permission.", ephemeral: true });
-  }
-  const rsn = i.options.getString("rsn").trim();
-  const team = i.options.getString("team").trim();
-  if (!rsn || !team) {
-    return i.reply({ content: "Both RSN and Team are required.", ephemeral: true });
-  }
-  data.rsnToTeam[rsn] = team;   // any custom team name is fine
-  saveData(data);
-  return i.reply({ content: `Assigned **${rsn}** to **${team}**.`, ephemeral: true });
-}
-
-if (i.commandName === "bingo-teams") {
-  const entries = Object.entries(data.rsnToTeam || {});
-  if (!entries.length) {
-    return i.reply({ content: "No RSN → Team assignments yet.", ephemeral: true });
-  }
-  // Group by team for readability
-  const byTeam = entries.reduce((acc, [rsn, team]) => {
-    acc[team] = acc[team] || [];
-    acc[team].push(rsn);
-    return acc;
-  }, {});
-  const lines = Object.keys(byTeam).sort().map(team => `**${team}**: ${byTeam[team].join(", ")}`);
-  return i.reply({ content: lines.join("\n"), ephemeral: true });
-}
 
   if (i.commandName === "bingo-password") {
     return i.reply(
@@ -345,7 +393,7 @@ if (i.commandName === "bingo-teams") {
         return `• ${t.key}: ${t.name} — not complete`;
       }
       return `• ✅ ${t.key}: ${t.name} — by ${c.by?.rsn} (${c.by?.team})`;
-    }).slice(0, 25); // keep it short
+    }).slice(0, 25);
     return i.reply({ content: `Progress: ${done}/${total}\n` + lines.join("\n"), ephemeral: true });
   }
 
@@ -369,39 +417,43 @@ if (i.commandName === "bingo-teams") {
         .setDescription(`**${rsn}** (${team}) completed **${tile.name}**`)
         .setFooter({ text: "OSRS Bingo" });
       await bingoChannel.send({ embeds: [embed] });
+      await postBoardImage();
     }
     return i.reply({ content: `Marked ${key} complete.`, ephemeral: true });
   }
 
   if (i.commandName === "bingo-setteam") {
-  if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-    return i.reply({ content: "Need Manage Server permission.", ephemeral: true });
+    if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild))
+      return i.reply({ content: "Need Manage Server permission.", ephemeral: true });
+    const rsn = i.options.getString("rsn").trim();
+    const team = i.options.getString("team").trim();
+    if (!rsn || !team) {
+      return i.reply({ content: "Both RSN and Team are required.", ephemeral: true });
+    }
+    data.rsnToTeam[rsn] = team;
+    saveData(data);
+    return i.reply({ content: `Assigned **${rsn}** to **${team}**.`, ephemeral: true });
   }
-  const rsn = i.options.getString("rsn").trim();
-  const team = i.options.getString("team").trim();
-  if (!rsn || !team) {
-    return i.reply({ content: "Both RSN and Team are required.", ephemeral: true });
-  }
-  data.rsnToTeam[rsn] = team;   // any custom team name is fine
-  saveData(data);
-  return i.reply({ content: `Assigned **${rsn}** to **${team}**.`, ephemeral: true });
-}
 
-if (i.commandName === "bingo-teams") {
-  const entries = Object.entries(data.rsnToTeam || {});
-  if (!entries.length) {
-    return i.reply({ content: "No RSN → Team assignments yet.", ephemeral: true });
+  if (i.commandName === "bingo-teams") {
+    const entries = Object.entries(data.rsnToTeam || {});
+    if (!entries.length) {
+      return i.reply({ content: "No RSN → Team assignments yet.", ephemeral: true });
+    }
+    const byTeam = entries.reduce((acc, [rsn, team]) => {
+      acc[team] = acc[team] || [];
+      acc[team].push(rsn);
+      return acc;
+    }, {});
+    const lines = Object.keys(byTeam).sort().map(team => `**${team}**: ${byTeam[team].join(", ")}`);
+    return i.reply({ content: lines.join("\n"), ephemeral: true });
   }
-  // Group by team for readability
-  const byTeam = entries.reduce((acc, [rsn, team]) => {
-    acc[team] = acc[team] || [];
-    acc[team].push(rsn);
-    return acc;
-  }, {});
-  const lines = Object.keys(byTeam).sort().map(team => `**${team}**: ${byTeam[team].join(", ")}`);
-  return i.reply({ content: lines.join("\n"), ephemeral: true });
-}
 
+  if (i.commandName === "bingo-board") {
+    await i.deferReply({ ephemeral: true });
+    await postBoardImage("Current Bingo Board:");
+    return i.editReply("Board posted.");
+  }
 });
 
 // --- Health check ---
@@ -421,7 +473,7 @@ function verifySignature(rawBody, signature) {
   }
 }
 
-// --- /drops (for future plugin) ---
+// --- /drops (future plugin path) ---
 app.post("/drops", (req, res) => {
   const now = new Date();
   if (now < START_TIME) return res.status(403).json({ error: "Bingo not started yet." });
@@ -430,23 +482,21 @@ app.post("/drops", (req, res) => {
   const rawBody = JSON.stringify(req.body || {});
   if (!verifySignature(rawBody, sig)) return res.status(401).json({ error: "Bad signature" });
 
-  const { password, itemName, itemId, player } = req.body || {};
+  const { password, itemName, player } = req.body || {};
   if (password !== PASSWORD) return res.status(403).json({ error: "Invalid password." });
   if (!bingoChannel) return res.status(400).json({ error: "No bingo channel set." });
   if (!itemName || !player) return res.status(400).json({ error: "Missing itemName/player" });
 
-  // Minimal: treat like a parsed message (team lookup + tile match)
   const team = findTeamByRSN(player);
   processParsedDrop(player, team, itemName);
   return res.json({ ok: true });
 });
 
-// --- Message parser for Dink/Loot Logger webhook posts ---
+// --- Parse webhook posts in #bingo-drops (Dink etc.) ---
 client.on("messageCreate", async (msg) => {
   if (!bingoChannel || msg.channel.id !== bingoChannel.id) return;
   if (!msg.author.bot) return;
 
-  // Prefer text content; fall back to embed description/title if needed
   let text = msg.content || "";
   if (!text && msg.embeds?.length) {
     const e = msg.embeds[0];
@@ -454,13 +504,10 @@ client.on("messageCreate", async (msg) => {
   }
   if (!text) return;
 
-  // Try a couple simple formats:
-  //  "🎉 Drop logged by Player: Abyssal Whip (ID: 4151)"
-  //  "Player received Abyssal Whip (ID: 4151)"
   let m =
     text.match(/by\s+\**(.+?)\**.*?:\s+\**(.+?)\**.*?\(ID:\s*(\d+)\)/i) ||
     text.match(/^\**?(.+?)\**?.*?received\s+\**(.+?)\**?.*?\(ID[:#]?\s*(\d+)\)/i) ||
-    text.match(/^\**?(.+?)\**?:\s+\**(.+?)\**/i); // fallback: "Player: Item"
+    text.match(/^\**?(.+?)\**?:\s+\**(.+?)\**/i);
 
   if (!m) return;
   const [, player, itemName] = m;
@@ -470,15 +517,13 @@ client.on("messageCreate", async (msg) => {
 });
 
 async function processParsedDrop(rsn, team, itemName) {
-  // Try to match tiles
   for (const tile of data.tiles) {
     if (tile.inactive) continue;
     if (!matchTile(tile, itemName)) continue;
 
     const justCompleted = handleProgress(tile, team, rsn, itemName);
+    const c = data.completed[tile.key];
     if (!justCompleted) {
-      // For counters, echo progress
-      const c = data.completed[tile.key];
       if (tile.type === "anyCount") {
         await bingoChannel?.send(`Progress: **${tile.name}** — ${c.progress.total}/${tile.count}`);
       } else if (tile.type === "orCount") {
@@ -500,7 +545,9 @@ async function processParsedDrop(rsn, team, itemName) {
       .setDescription(`**${rsn}** (${team}) completed **${tile.name}**`)
       .addFields({ name: "Tile Key", value: tile.key, inline: true })
       .setFooter({ text: "OSRS Bingo" });
+
     await bingoChannel?.send({ embeds: [embed] });
+    await postBoardImage(); // <— update visual board on every completion
   }
 }
 
