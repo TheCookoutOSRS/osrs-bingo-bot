@@ -271,10 +271,14 @@ async function renderBoardBuffer() {
 
   return canvas.toBuffer("image/png");
 }
-async function postBoardImage(note = "") {
-  if (!bingoChannel) return;
+async function postBoardImage(targetChannel, note = "") {
+  const ch = targetChannel || bingoChannel;
+  if (!ch) {
+    console.warn("[BOARD] No channel to post to. Set with /bingo-setchannel.");
+    return;
+  }
   const buf = await renderBoardBuffer();
-  await bingoChannel.send({
+  await ch.send({
     content: note || "",
     files: [{ attachment: buf, name: "bingo.png" }]
   });
@@ -450,7 +454,7 @@ client.on("interactionCreate", async (i) => {
   }
 
   if (i.commandName === "bingo-board") {
-    await i.deferReply({ ephemeral: true });
+    await i.deferReply({ flags: 64 }); // ephemeral (avoids the deprecation warning)
     await postBoardImage("Current Bingo Board:");
     return i.editReply("Board posted.");
   }
