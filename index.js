@@ -142,25 +142,33 @@ function handleProgressForTeam(tile, team, rsn, itemName) {
   }
 
   if (tile.type === "orSetAll") {
-    if (!entry.sets.A) entry.sets.A = {};
-    if (!entry.sets.B) entry.sets.B = {};
+  // Support any number of alternative sets (N sets of 4 each)
+  if (!entry.sets) entry.sets = {}; // { "0": { "item": true }, "1": {...}, ... }
 
-    const hitA = tile.sets[0].find(rx => new RegExp(rx, "i").test(itemName));
-    const hitB = tile.sets[1].find(rx => new RegExp(rx, "i").test(itemName));
-    if (hitA) entry.sets.A[hitA] = true;
-    if (hitB) entry.sets.B[hitB] = true;
+  let completedIndex = null;
 
-    const aDone = tile.sets[0].every(rx => entry.sets.A[rx]);
-    const bDone = tile.sets[1].every(rx => entry.sets.B[rx]);
+  for (let s = 0; s < tile.sets.length; s++) {
+    const setArr = tile.sets[s];
+    if (!entry.sets[s]) entry.sets[s] = {};
+    const hit = setArr.find(rx => new RegExp(rx, "i").test(itemName));
+    if (hit) entry.sets[s][hit] = true;
 
-    if (aDone || bDone) {
-      entry.done = true;
-      entry.by = { team, rsn, itemName, ts: Date.now() };
-      entry.sets.completed = aDone ? "A" : "B";
-      return true;
+    const allDone = setArr.every(rx => entry.sets[s][rx]);
+    if (allDone) {
+      completedIndex = s;
+      break;
     }
-    return false;
   }
+
+  if (completedIndex !== null) {
+    entry.done = true;
+    entry.by = { team, rsn, itemName, ts: Date.now() };
+    entry.sets.completedIndex = completedIndex;
+    return true;
+  }
+  return false;
+}
+
 
   if (tile.type === "orCount") {
     const inCountGroup = tile.sources.some(rx => new RegExp(rx, "i").test(itemName));
@@ -431,14 +439,15 @@ client.on("interactionCreate", async (i) => {
           return `• ${t.key}: ${t.name} — ${have}/${t.set.length}`;
         }
         if (t.type === "orSetAll") {
-          const A = Object.keys(c?.sets?.A || {}).length;
-          const B = Object.keys(c?.sets?.B || {}).length;
-          return `• ${t.key}: ${t.name} — A:${A}/${t.sets[0].length} or B:${B}/${t.sets[1].length}`;
-        }
-        return `• ${t.key}: ${t.name} — not complete`;
-      }
-      return `• ✅ ${t.key}: ${t.name} — by ${c.by?.rsn} (${team})`;
-    }).slice(0, 25);
+  const counts = t.sets.map((setArr, idx) => {
+    const got = Object.keys((c?.sets && c.sets[idx]) || {}).length;
+    return { idx, got, total: setArr.length };
+  });
+  const best = counts.sort((a, b) => b.got - a.got)[0] || { got: 0, total: t.sets[0]?.length || 4 };
+  return `• ${t.key}: ${t.name} — best set ${best.got}/${best.total}`;
+}
+
+  }}).slice(0, 25);
 
     return i.editReply({ content: `**${team}** Progress: ${done}/${total}\n` + lines.join("\n") });
   } catch (err) {
@@ -636,9 +645,20 @@ async function processParsedDrop(rsn, team, itemName) {
         const have = Object.keys(c.sets.collected || {}).length;
         await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${have}/${tile.set.length}`);
       } else if (tile.type === "orSetAll") {
-        const A = Object.keys(c.sets.A || {}).length, B = Object.keys(c.sets.B || {}).length;
-        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — A:${A}/${tile.setsA_len || 0} or B:${B}/${tile.setsB_len || 0}`);
-      }
+  // Show best progress across all alternative sets (supports N sets)
+  const counts = tile.sets.map((setArr, idx) => {
+    const got = Object.keys((c.sets && c.sets[idx]) || {}).length;
+    return { idx, got, total: setArr.length };
+  });
+
+  counts.sort((a, b) => b.got - a.got);
+  const best = counts[0] || { got: 0, total: (tile.sets[0]?.length || 4) };
+
+  await bingoChannel?.send(
+    `Progress (**${team}**): **${tile.name}** — best set ${best.got}/${best.total}`
+  );
+}
+
       saveData(data);
       continue;
     }
