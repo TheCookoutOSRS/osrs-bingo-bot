@@ -1,10 +1,28 @@
 {
   "rsnToTeam": {
-    "Player1": "Team A",
-    "Player2": "Team A",
-    "Player3": "Team B",
-    "Player4": "Team C",
-    "Player5": "Team D"
+    "Jan Griffith": "Kootch bought his infernal cape",
+    "Bloviating": "Kootch bought his infernal cape",
+    "Unlucky Drew": "Kootch bought his infernal cape",
+    "fire blob26": "Kootch bought his infernal cape",
+    "V erz": "Kootch bought his infernal cape",
+
+    "Uzui": "San on my chest",
+    "warm hot dog": "San on my chest",
+    "Solek 3": "San on my chest",
+    "theMast3r": "San on my chest",
+    "ur a bird": "San on my chest",
+
+    "QuickShot x": "helmets and crayons",
+    "Zaes": "Helmets and crayons",
+    "Dead Drifter": "Helmets and crayons",
+    "Jerry7Garcia": "Helmets and crayons",
+    "Resolve": "Helmets and crayons",
+
+    "Juduel": "My arm's big hog",
+    "Daliver": "My arm's big hog",
+    "Kootch": "My arm's big hog",
+    "Gl ass": "My arm's big hog",
+    "Rare Pets": "My arm's big hog"
   },
   "tiles": [
     {
@@ -27,12 +45,19 @@
       "matches": ["tanzanite\\s+mutagen", "magma\\s+mutagen"]
     },
     {
-      "key": "t3_blank",
-      "name": "Blank",
-      "type": "single",
-      "matches": [],
-      "inactive": true
-    },
+  "key": "t3_barrows_full_set",
+  "name": "Barrows: complete any full set",
+  "type": "orSetAll",
+  "sets": [
+    ["Dharok's helm", "Dharok's platebody", "Dharok's platelegs", "Dharok's greataxe"],
+    ["Guthan's helm", "Guthan's platebody", "Guthan's chainskirt", "Guthan's warspear"],
+    ["Torag's helm", "Torag's platebody", "Torag's platelegs", "Torag's hammers"],
+    ["Verac's helm", "Verac's brassard", "Verac's plateskirt", "Verac's flail"],
+    ["Karil's coif", "Karil's leathertop", "Karil's leatherskirt", "Karil's crossbow"],
+    ["Ahrim's hood", "Ahrim's robetop", "Ahrim's robeskirt", "Ahrim's staff"]
+  ]
+  },
+    
     {
       "key": "t4_dclaws_dhb_dhcb",
       "name": "Dragon claws / Dinh's bulwark / DHCB",
