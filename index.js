@@ -34,7 +34,13 @@ console.log(
 );
 
 // --- Data layer ---
-const DATA_PATH = "./bingo.json";
+// replace your DATA_PATH lines with this:
+// Use /data (persistent disk in Render) if available, else fallback to local file
+const PERSIST_DIR = "/data";
+const DATA_PATH = fs.existsSync(PERSIST_DIR)
+  ? `${PERSIST_DIR}/bingo.json`
+  : "./bingo.json";
+
 function loadData() {
   if (!fs.existsSync(DATA_PATH)) {
     fs.writeFileSync(
@@ -786,3 +792,5 @@ client.login(DISCORD_TOKEN);
 // Crash guards
 process.on("unhandledRejection", (r) => console.error("[UNHANDLED REJECTION]", r));
 process.on("uncaughtException", (e) => console.error("[UNCAUGHT EXCEPTION]", e));
+process.on("SIGTERM", () => console.log("[SHUTDOWN] SIGTERM received"));
+process.on("SIGINT",  () => console.log("[SHUTDOWN] SIGINT received"));
