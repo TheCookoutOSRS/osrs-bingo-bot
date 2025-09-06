@@ -105,6 +105,11 @@ function ensureTileProgressForTeam(tile, team) {
   return bucket[tile.key];
 }
 
+// --- NEW: tolerant key normalizer (Fix 1) ---
+function normalizeKey(s = "") {
+  return s.toLowerCase().replace(/[\s_]+/g, " ").trim();
+}
+
 function handleProgressForTeam(tile, team, rsn, itemName) {
   const entry = ensureTileProgressForTeam(tile, team);
   if (entry.done) return false;
@@ -139,7 +144,7 @@ function handleProgressForTeam(tile, team, rsn, itemName) {
     return false;
   }
 
-  // >>> generalized N-set orSetAll (e.g., Barrows)
+  // generalized N-set orSetAll (e.g., Barrows)
   if (tile.type === "orSetAll") {
     if (!entry.sets) entry.sets = {}; // { "0": { "Item": true }, "1": {...} }
     let completedIndex = null;
@@ -166,7 +171,6 @@ function handleProgressForTeam(tile, team, rsn, itemName) {
     }
     return false;
   }
-  // <<< end orSetAll
 
   if (tile.type === "orCount") {
     const inCountGroup = tile.sources.some(rx => new RegExp(rx, "i").test(itemName));
@@ -348,6 +352,12 @@ let bingoChannel = null;
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
+  // Build dynamic choices for keys (for future use if desired)
+  const tileChoices = (data.tiles || []).slice(0, 25).map(t => ({
+    name: `${t.key} — ${t.name}`.slice(0, 100),
+    value: t.key
+  }));
+
   // Register slash commands
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
   try {
@@ -379,6 +389,7 @@ client.once("ready", async () => {
             name: "bingo-mark",
             description: "Manually mark a tile complete for a team (e.g., PET/edge cases)",
             options: [
+              // you can add "choices: tileChoices" later if you want a dropdown
               { name: "tilekey", type: 3, description: "Tile key", required: true },
               { name: "rsn",     type: 3, description: "Player RSN", required: true },
               { name: "team",    type: 3, description: "Team name", required: true }
@@ -392,7 +403,9 @@ client.once("ready", async () => {
               { name: "team", type: 3, description: "Team name (free text)", required: true }
             ]
           },
-          { name: "bingo-teams", description: "Show current RSN → Team assignments" }
+          { name: "bingo-teams", description: "Show current RSN → Team assignments" },
+          // --- BONUS: list current keys loaded from bingo.json
+          { name: "bingo-keys", description: "List all current tile keys" }
         ],
       }
     );
@@ -515,14 +528,18 @@ client.on("interactionCreate", async (i) => {
         return i.editReply("Need Manage Server permission.");
       }
 
-      const key  = i.options.getString("tilekey");
+      const keyRaw = i.options.getString("tilekey");
+      const keyNorm = normalizeKey(keyRaw);
       const rsn  = i.options.getString("rsn");
       const team = i.options.getString("team");
 
-      console.log("[/bingo-mark]", { key, rsn, team });
+      console.log("[/bingo-mark]", { keyRaw, keyNorm, rsn, team });
 
-      const tile = data.tiles.find(t => t.key === key);
-      if (!tile) return i.editReply("Unknown tile key.");
+      const tile = data.tiles.find(t => normalizeKey(t.key) === keyNorm);
+      if (!tile) {
+        const known = (data.tiles || []).map(t => t.key).join(", ");
+        return i.editReply(`Unknown tile key: \`${keyRaw}\`.\nKnown keys: ${known}`);
+      }
 
       ensureTeamBucket(team);
       const e = ensureTileProgressForTeam(tile, team);
@@ -541,7 +558,7 @@ client.on("interactionCreate", async (i) => {
         await postBoardImage(bingoChannel, team);
       }
 
-      return i.editReply(`Marked \`${key}\` complete for **${team}**.`);
+      return i.editReply(`Marked \`${tile.key}\` complete for **${team}**.`);
     } catch (err) {
       console.error("Error in /bingo-mark:", err);
       if (!i.replied) {
@@ -616,6 +633,18 @@ client.on("interactionCreate", async (i) => {
     } catch (err) {
       console.error("Error in /bingo-teams:", err);
       if (!i.replied) try { await i.editReply("Error listing teams."); } catch {}
+    }
+  }
+  // --- BONUS: list current tile keys loaded from bingo.json
+  else if (i.commandName === "bingo-keys") {
+    try {
+      await i.deferReply({ ephemeral: true });
+      const keys = (data.tiles || []).map(t => t.key);
+      if (!keys.length) return i.editReply("No tiles loaded.");
+      return i.editReply(keys.join("\n"));
+    } catch (err) {
+      console.error("Error in /bingo-keys:", err);
+      if (!i.replied) try { await i.editReply("Error listing keys."); } catch {}
     }
   }
 });
