@@ -5,6 +5,7 @@ import express from "express";
 import bodyParser from "body-parser";
 import crypto from "crypto";
 import fs from "fs";
+import path from "path";
 import {
   Client,
   GatewayIntentBits,
@@ -33,31 +34,47 @@ console.log(
   "| token:", DISCORD_TOKEN ? "OK" : "MISSING"
 );
 
-// --- Data layer ---
-// replace your DATA_PATH lines with this:
-// Use /data (persistent disk in Render) if available, else fallback to local file
+// --- Data layer (seed /data from repo on first boot) ---
 const PERSIST_DIR = "/data";
+const REPO_DEFAULT_PATH = "./bingo.json";
 const DATA_PATH = fs.existsSync(PERSIST_DIR)
-  ? `${PERSIST_DIR}/bingo.json`
-  : "./bingo.json";
+  ? path.join(PERSIST_DIR, "bingo.json")
+  : REPO_DEFAULT_PATH;
 
 function loadData() {
+  // Seed /data/bingo.json from repo when the disk is empty
   if (!fs.existsSync(DATA_PATH)) {
-    fs.writeFileSync(
-      DATA_PATH,
-      JSON.stringify(
-        {
-          rsnToTeam: {},
-          tiles: [],
-          completedByTeam: {},
-          channelId: ""
-        },
-        null, 2
-      )
-    );
+    if (DATA_PATH.startsWith("/data") && fs.existsSync(REPO_DEFAULT_PATH)) {
+      try {
+        fs.mkdirSync(path.dirname(DATA_PATH), { recursive: true });
+        const src = JSON.parse(fs.readFileSync(REPO_DEFAULT_PATH, "utf8"));
+        fs.writeFileSync(DATA_PATH, JSON.stringify(src, null, 2));
+        console.log(
+          `[DATA] Seeded ${DATA_PATH} from repo bingo.json (tiles=${(src.tiles || []).length}, rsns=${Object.keys(
+            src.rsnToTeam || {}
+          ).length})`
+        );
+      } catch (e) {
+        console.error("[DATA] Failed seeding from repo bingo.json:", e);
+      }
+    } else {
+      // Minimal skeleton so bot can still run
+      fs.mkdirSync(path.dirname(DATA_PATH), { recursive: true });
+      fs.writeFileSync(
+        DATA_PATH,
+        JSON.stringify(
+          { rsnToTeam: {}, tiles: [], completedByTeam: {}, channelId: "" },
+          null,
+          2
+        )
+      );
+      console.warn(`[DATA] Created blank ${DATA_PATH}`);
+    }
   }
+
   const d = JSON.parse(fs.readFileSync(DATA_PATH, "utf8"));
 
+  // migrate legacy structure if present
   if (d.completed && !d.completedByTeam) {
     console.warn("[MIGRATE] Found legacy 'completed'. Creating completedByTeam.GLOBAL.");
     d.completedByTeam = { GLOBAL: d.completed };
@@ -65,6 +82,9 @@ function loadData() {
     fs.writeFileSync(DATA_PATH, JSON.stringify(d, null, 2));
   }
   if (!d.completedByTeam) d.completedByTeam = {};
+  console.log(
+    `[DATA] Loaded tiles=${(d.tiles || []).length}; RSNs=${Object.keys(d.rsnToTeam || {}).length} from ${DATA_PATH}`
+  );
   return d;
 }
 function saveData(d) {
@@ -77,20 +97,20 @@ function matchTile(tile, itemName) {
   if (!tile || !itemName) return false;
 
   if (tile.type === "single") {
-    return tile.matches.some(rx => new RegExp(rx, "i").test(itemName));
+    return tile.matches.some((rx) => new RegExp(rx, "i").test(itemName));
   }
   if (tile.type === "anyCount") {
-    return tile.sources.some(rx => new RegExp(rx, "i").test(itemName));
+    return tile.sources.some((rx) => new RegExp(rx, "i").test(itemName));
   }
   if (tile.type === "setAll") {
-    return tile.set.some(rx => new RegExp(rx, "i").test(itemName));
+    return tile.set.some((rx) => new RegExp(rx, "i").test(itemName));
   }
   if (tile.type === "orSetAll") {
-    return tile.sets.flat().some(rx => new RegExp(rx, "i").test(itemName));
+    return tile.sets.flat().some((rx) => new RegExp(rx, "i").test(itemName));
   }
   if (tile.type === "orCount") {
-    const inCountGroup = tile.sources.some(rx => new RegExp(rx, "i").test(itemName));
-    const inAlt = (tile.alternativeMatches || []).some(rx => new RegExp(rx, "i").test(itemName));
+    const inCountGroup = tile.sources.some((rx) => new RegExp(rx, "i").test(itemName));
+    const inAlt = (tile.alternativeMatches || []).some((rx) => new RegExp(rx, "i").test(itemName));
     return inCountGroup || inAlt;
   }
   if (tile.type === "pet") return false; // manual for now
@@ -111,7 +131,7 @@ function ensureTileProgressForTeam(tile, team) {
   return bucket[tile.key];
 }
 
-// --- NEW: tolerant key normalizer (Fix 1) ---
+// --- tolerant key normalizer (Fix 1) ---
 function normalizeKey(s = "") {
   return s.toLowerCase().replace(/[\s_]+/g, " ").trim();
 }
@@ -138,10 +158,10 @@ function handleProgressForTeam(tile, team, rsn, itemName) {
 
   if (tile.type === "setAll") {
     if (!entry.sets.collected) entry.sets.collected = {};
-    const matched = tile.set.find(rx => new RegExp(rx, "i").test(itemName));
+    const matched = tile.set.find((rx) => new RegExp(rx, "i").test(itemName));
     if (matched) entry.sets.collected[matched] = true;
 
-    const allDone = tile.set.every(rx => entry.sets.collected[rx]);
+    const allDone = tile.set.every((rx) => entry.sets.collected[rx]);
     if (allDone) {
       entry.done = true;
       entry.by = { team, rsn, itemName, ts: Date.now() };
@@ -159,10 +179,10 @@ function handleProgressForTeam(tile, team, rsn, itemName) {
       const setArr = tile.sets[s];
       if (!entry.sets[s]) entry.sets[s] = {};
 
-      const hit = setArr.find(rx => new RegExp(rx, "i").test(itemName));
+      const hit = setArr.find((rx) => new RegExp(rx, "i").test(itemName));
       if (hit) entry.sets[s][hit] = true;
 
-      const allDone = setArr.every(rx => entry.sets[s][rx]);
+      const allDone = setArr.every((rx) => entry.sets[s][rx]);
       if (allDone) {
         completedIndex = s;
         break;
@@ -179,8 +199,8 @@ function handleProgressForTeam(tile, team, rsn, itemName) {
   }
 
   if (tile.type === "orCount") {
-    const inCountGroup = tile.sources.some(rx => new RegExp(rx, "i").test(itemName));
-    const inAlt = (tile.alternativeMatches || []).some(rx => new RegExp(rx, "i").test(itemName));
+    const inCountGroup = tile.sources.some((rx) => new RegExp(rx, "i").test(itemName));
+    const inAlt = (tile.alternativeMatches || []).some((rx) => new RegExp(rx, "i").test(itemName));
 
     if (inAlt) {
       entry.done = true;
@@ -297,7 +317,7 @@ async function renderBoardBuffer(teamLabel) {
 
     // Progress badge (draw last so it's on top)
     if (!tile?.inactive) {
-      const bucket = (data.completedByTeam?.[teamLabel] || {});
+      const bucket = data.completedByTeam?.[teamLabel] || {};
       const c = bucket[tile.key];
       if (c && !c.done) {
         let badge = "";
@@ -307,15 +327,16 @@ async function renderBoardBuffer(teamLabel) {
           const have = Object.keys(c.sets?.collected || {}).length;
           badge = `${have}/${tile.set.length}`;
         } else if (tile.type === "orCount") {
-          if (c.by?.alt) { badge = "ALT"; } else {
-            badge = `${c.progress?.total || 0}/${tile.count}`;
-          }
+          badge = c.by?.alt ? "ALT" : `${c.progress?.total || 0}/${tile.count}`;
         } else if (tile.type === "orSetAll") {
           const counts = tile.sets.map((setArr, idx) => {
             const got = Object.keys((c.sets && c.sets[idx]) || {}).length;
             return { got, total: setArr.length };
           });
-          const best = counts.sort((a,b)=>b.got-a.got)[0] || { got: 0, total: (tile.sets[0]?.length || 4) };
+          const best = counts.sort((a, b) => b.got - a.got)[0] || {
+            got: 0,
+            total: tile.sets[0]?.length || 4,
+          };
           badge = `${best.got}/${best.total}`;
         }
 
@@ -334,10 +355,16 @@ async function renderBoardBuffer(teamLabel) {
 }
 async function postBoardImage(targetChannel, teamLabel, note = "") {
   const ch = targetChannel || bingoChannel;
-  if (!ch) { console.warn("[BOARD] No channel to post to."); return; }
+  if (!ch) {
+    console.warn("[BOARD] No channel to post to.");
+    return;
+  }
   try {
     const buf = await renderBoardBuffer(teamLabel);
-    await ch.send({ content: note || "", files: [{ attachment: buf, name: `bingo_${teamLabel.replace(/\s+/g,'_')}.png` }] });
+    await ch.send({
+      content: note || "",
+      files: [{ attachment: buf, name: `bingo_${teamLabel.replace(/\s+/g, "_")}.png` }],
+    });
   } catch (e) {
     console.error("[BOARD] Failed to send image:", e);
     throw e;
@@ -346,11 +373,7 @@ async function postBoardImage(targetChannel, teamLabel, note = "") {
 
 // --- Discord client ---
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
 let bingoChannel = null;
@@ -358,63 +381,53 @@ let bingoChannel = null;
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  // Build dynamic choices for keys (for future use if desired)
-  const tileChoices = (data.tiles || []).slice(0, 25).map(t => ({
-    name: `${t.key} — ${t.name}`.slice(0, 100),
-    value: t.key
-  }));
-
   // Register slash commands
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
   try {
-    await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-      {
-        body: [
-          {
-            name: "bingo-setchannel",
-            description: "Set the channel for bingo drops",
-            options: [{ name: "channel", type: 7, description: "Target channel", required: true }],
-          },
-          { name: "bingo-password", description: "Reveal the bingo password (and start time)" },
-          {
-            name: "bingo-board",
-            description: "Post the current visual bingo board image for a team",
-            options: [{ name: "team", type: 3, description: "Team name", required: true }]
-          },
-          {
-            name: "bingo-add",
-            description: "Simulate a drop (manual progress) for a team",
-            options: [
-              { name: "team",  type: 3, description: "Team name", required: true },
-              { name: "rsn",   type: 3, description: "Player RSN", required: true },
-              { name: "item",  type: 3, description: "Item name as it would appear", required: true }
-            ]
-          },
-          {
-            name: "bingo-mark",
-            description: "Manually mark a tile complete for a team (e.g., PET/edge cases)",
-            options: [
-              // you can add "choices: tileChoices" later if you want a dropdown
-              { name: "tilekey", type: 3, description: "Tile key", required: true },
-              { name: "rsn",     type: 3, description: "Player RSN", required: true },
-              { name: "team",    type: 3, description: "Team name", required: true }
-            ]
-          },
-          {
-            name: "bingo-setteam",
-            description: "Assign an RSN to a team",
-            options: [
-              { name: "rsn",  type: 3, description: "Player RSN", required: true },
-              { name: "team", type: 3, description: "Team name (free text)", required: true }
-            ]
-          },
-          { name: "bingo-teams", description: "Show current RSN → Team assignments" },
-          // --- BONUS: list current keys loaded from bingo.json
-          { name: "bingo-keys", description: "List all current tile keys" }
-        ],
-      }
-    );
+    await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
+      body: [
+        {
+          name: "bingo-setchannel",
+          description: "Set the channel for bingo drops",
+          options: [{ name: "channel", type: 7, description: "Target channel", required: true }],
+        },
+        { name: "bingo-password", description: "Reveal the bingo password (and start time)" },
+        {
+          name: "bingo-board",
+          description: "Post the current visual bingo board image for a team",
+          options: [{ name: "team", type: 3, description: "Team name", required: true }],
+        },
+        {
+          name: "bingo-add",
+          description: "Simulate a drop (manual progress) for a team",
+          options: [
+            { name: "team", type: 3, description: "Team name", required: true },
+            { name: "rsn", type: 3, description: "Player RSN", required: true },
+            { name: "item", type: 3, description: "Item name as it would appear", required: true },
+          ],
+        },
+        {
+          name: "bingo-mark",
+          description: "Manually mark a tile complete for a team (e.g., PET/edge cases)",
+          options: [
+            { name: "tilekey", type: 3, description: "Tile key", required: true },
+            { name: "rsn", type: 3, description: "Player RSN", required: true },
+            { name: "team", type: 3, description: "Team name", required: true },
+          ],
+        },
+        {
+          name: "bingo-setteam",
+          description: "Assign an RSN to a team",
+          options: [
+            { name: "rsn", type: 3, description: "Player RSN", required: true },
+            { name: "team", type: 3, description: "Team name (free text)", required: true },
+          ],
+        },
+        { name: "bingo-teams", description: "Show current RSN → Team assignments" },
+        { name: "bingo-keys", description: "List all current tile keys" },
+        { name: "bingo-reseed", description: "ADMIN: replace /data/bingo.json with repo copy" },
+      ],
+    });
     console.log("Slash commands registered.");
   } catch (err) {
     console.error("Failed to register slash commands:", err);
@@ -429,11 +442,16 @@ client.once("ready", async () => {
   }
 });
 
-// Log every interaction (helps diagnose)
+// Interactions
 client.on("interactionCreate", async (i) => {
   if (!i.isChatInputCommand()) return;
-  console.log("[INT]", i.commandName, i.options?.data?.map(o => `${o.name}=${o.value}`).join(", "));
+  console.log(
+    "[INT]",
+    i.commandName,
+    i.options?.data?.map((o) => `${o.name}=${o.value}`).join(", ")
+  );
 
+  // bingo-setchannel
   if (i.commandName === "bingo-setchannel") {
     try {
       await i.deferReply({ ephemeral: true });
@@ -449,6 +467,8 @@ client.on("interactionCreate", async (i) => {
       if (!i.replied) try { await i.editReply("Error setting channel."); } catch {}
     }
   }
+
+  // bingo-password
   else if (i.commandName === "bingo-password") {
     try {
       await i.deferReply({ ephemeral: true });
@@ -462,6 +482,8 @@ client.on("interactionCreate", async (i) => {
       if (!i.replied) try { await i.editReply("Error showing password."); } catch {}
     }
   }
+
+  // bingo-status (kept for convenience)
   else if (i.commandName === "bingo-status") {
     try {
       await i.deferReply({ ephemeral: true });
@@ -471,35 +493,38 @@ client.on("interactionCreate", async (i) => {
 
       const bucket = data.completedByTeam?.[team] || {};
       const total = data.tiles.length;
-      const done = data.tiles.filter(t => bucket[t.key]?.done).length;
+      const done = data.tiles.filter((t) => bucket[t.key]?.done).length;
 
-      const lines = data.tiles.map(t => {
-        const c = bucket[t.key];
-        if (!c || !c.done) {
-          if (t.type === "anyCount") {
-            const cur = c?.progress?.total || 0;
-            return `• ${t.key}: ${t.name} — ${cur}/${t.count}`;
+      const lines = data.tiles
+        .map((t) => {
+          const c = bucket[t.key];
+          if (!c || !c.done) {
+            if (t.type === "anyCount") {
+              const cur = c?.progress?.total || 0;
+              return `• ${t.key}: ${t.name} — ${cur}/${t.count}`;
+            }
+            if (t.type === "orCount") {
+              const cur = c?.progress?.total || 0;
+              return `• ${t.key}: ${t.name} — ${cur}/${t.count} (or alt)`;
+            }
+            if (t.type === "setAll") {
+              const have = Object.keys(c?.sets?.collected || {}).length;
+              return `• ${t.key}: ${t.name} — ${have}/${t.set.length}`;
+            }
+            if (t.type === "orSetAll") {
+              const counts = t.sets.map((setArr, idx) => {
+                const got = Object.keys((c?.sets && c.sets[idx]) || {}).length;
+                return { idx, got, total: setArr.length };
+              });
+              const best =
+                counts.sort((a, b) => b.got - a.got)[0] || { got: 0, total: t.sets[0]?.length || 4 };
+              return `• ${t.key}: ${t.name} — best set ${best.got}/${best.total}`;
+            }
+            return `• ${t.key}: ${t.name} — not complete`;
           }
-          if (t.type === "orCount") {
-            const cur = c?.progress?.total || 0;
-            return `• ${t.key}: ${t.name} — ${cur}/${t.count} (or alt)`;
-          }
-          if (t.type === "setAll") {
-            const have = Object.keys(c?.sets?.collected || {}).length;
-            return `• ${t.key}: ${t.name} — ${have}/${t.set.length}`;
-          }
-          if (t.type === "orSetAll") {
-            const counts = t.sets.map((setArr, idx) => {
-              const got = Object.keys((c?.sets && c.sets[idx]) || {}).length;
-              return { idx, got, total: setArr.length };
-            });
-            const best = counts.sort((a, b) => b.got - a.got)[0] || { got: 0, total: t.sets[0]?.length || 4 };
-            return `• ${t.key}: ${t.name} — best set ${best.got}/${best.total}`;
-          }
-          return `• ${t.key}: ${t.name} — not complete`;
-        }
-        return `• ✅ ${t.key}: ${t.name} — by ${c.by?.rsn} (${team})`;
-      }).slice(0, 25);
+          return `• ✅ ${t.key}: ${t.name} — by ${c.by?.rsn} (${team})`;
+        })
+        .slice(0, 25);
 
       return i.editReply({ content: `**${team}** Progress: ${done}/${total}\n` + lines.join("\n") });
     } catch (err) {
@@ -507,43 +532,46 @@ client.on("interactionCreate", async (i) => {
       if (!i.replied) try { await i.editReply("Error building status. Check logs."); } catch {}
     }
   }
+
+  // bingo-board
   else if (i.commandName === "bingo-board") {
     try {
       await i.deferReply({ ephemeral: true });
-
       const team = i.options.getString("team")?.trim();
       if (!team) return i.editReply("Team is required.");
-
       const buf = await renderBoardBuffer(team);
       await i.editReply({
         content: `Current Bingo Board — **${team}**`,
-        files: [{ attachment: buf, name: `bingo_${team.replace(/\s+/g,'_')}.png` }]
+        files: [{ attachment: buf, name: `bingo_${team.replace(/\s+/g, "_")}.png` }],
       });
     } catch (err) {
       console.error("Error in /bingo-board:", err);
       if (!i.replied) {
-        try { await i.editReply("Error generating board image."); } catch {}
+        try {
+          await i.editReply("Error generating board image.");
+        } catch {}
       }
     }
   }
+
+  // bingo-mark (Fix 1 tolerant lookup)
   else if (i.commandName === "bingo-mark") {
     try {
       await i.deferReply({ ephemeral: true });
-
       if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
         return i.editReply("Need Manage Server permission.");
       }
 
       const keyRaw = i.options.getString("tilekey");
       const keyNorm = normalizeKey(keyRaw);
-      const rsn  = i.options.getString("rsn");
+      const rsn = i.options.getString("rsn");
       const team = i.options.getString("team");
 
       console.log("[/bingo-mark]", { keyRaw, keyNorm, rsn, team });
 
-      const tile = data.tiles.find(t => normalizeKey(t.key) === keyNorm);
+      const tile = data.tiles.find((t) => normalizeKey(t.key) === keyNorm);
       if (!tile) {
-        const known = (data.tiles || []).map(t => t.key).join(", ");
+        const known = (data.tiles || []).map((t) => t.key).join(", ");
         return i.editReply(`Unknown tile key: \`${keyRaw}\`.\nKnown keys: ${known}`);
       }
 
@@ -568,44 +596,44 @@ client.on("interactionCreate", async (i) => {
     } catch (err) {
       console.error("Error in /bingo-mark:", err);
       if (!i.replied) {
-        try { await i.editReply("Something went wrong running /bingo-mark. Check logs."); } catch {}
+        try {
+          await i.editReply("Something went wrong running /bingo-mark. Check logs.");
+        } catch {}
       }
     }
   }
+
+  // bingo-add (manual drop simulation)
   else if (i.commandName === "bingo-add") {
     try {
       await i.deferReply({ ephemeral: true });
-
       const team = i.options.getString("team")?.trim();
-      const rsn  = i.options.getString("rsn")?.trim();
+      const rsn = i.options.getString("rsn")?.trim();
       const item = i.options.getString("item")?.trim();
-
-      if (!team || !rsn || !item) {
-        return i.editReply("Missing team/rsn/item.");
-      }
+      if (!team || !rsn || !item) return i.editReply("Missing team/rsn/item.");
 
       console.log("[/bingo-add]", { team, rsn, item });
-
       ensureTeamBucket(team);
 
       const before = JSON.stringify(data.completedByTeam?.[team] || {});
       await processParsedDrop(rsn, team, item);
-      const after  = JSON.stringify(data.completedByTeam?.[team] || {});
-
+      const after = JSON.stringify(data.completedByTeam?.[team] || {});
       if (before === after) {
-        return i.editReply(`No matching tile for **${item}** on **${team}**. Check item spelling or tile regex.`);
+        return i.editReply(
+          `No matching tile for **${item}** on **${team}**. Check item spelling or tile regex.`
+        );
       }
-
       return i.editReply(`Recorded **${item}** for **${rsn}** on **${team}**.`);
     } catch (err) {
       console.error("Error in /bingo-add:", err);
       if (!i.replied) try { await i.editReply("Error adding drop. Check logs."); } catch {}
     }
   }
+
+  // bingo-setteam
   else if (i.commandName === "bingo-setteam") {
     try {
       await i.deferReply({ ephemeral: true });
-
       if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild))
         return i.editReply("Need Manage Server permission.");
 
@@ -621,36 +649,59 @@ client.on("interactionCreate", async (i) => {
       if (!i.replied) try { await i.editReply("Error setting team."); } catch {}
     }
   }
+
+  // bingo-teams
   else if (i.commandName === "bingo-teams") {
     try {
       await i.deferReply({ ephemeral: true });
-
       const entries = Object.entries(data.rsnToTeam || {});
       if (!entries.length) return i.editReply("No RSN → Team assignments yet.");
-
       const byTeam = entries.reduce((acc, [rsn, team]) => {
         acc[team] = acc[team] || [];
         acc[team].push(rsn);
         return acc;
       }, {});
-      const lines = Object.keys(byTeam).sort().map(team => `**${team}**: ${byTeam[team].join(", ")}`);
-
+      const lines = Object.keys(byTeam)
+        .sort()
+        .map((team) => `**${team}**: ${byTeam[team].join(", ")}`);
       return i.editReply(lines.join("\n"));
     } catch (err) {
       console.error("Error in /bingo-teams:", err);
       if (!i.replied) try { await i.editReply("Error listing teams."); } catch {}
     }
   }
-  // --- BONUS: list current tile keys loaded from bingo.json
+
+  // bingo-keys
   else if (i.commandName === "bingo-keys") {
     try {
       await i.deferReply({ ephemeral: true });
-      const keys = (data.tiles || []).map(t => t.key);
+      const keys = (data.tiles || []).map((t) => t.key);
       if (!keys.length) return i.editReply("No tiles loaded.");
       return i.editReply(keys.join("\n"));
     } catch (err) {
       console.error("Error in /bingo-keys:", err);
       if (!i.replied) try { await i.editReply("Error listing keys."); } catch {}
+    }
+  }
+
+  // ADMIN: bingo-reseed (replace /data/bingo.json with repo copy)
+  else if (i.commandName === "bingo-reseed") {
+    try {
+      await i.deferReply({ ephemeral: true });
+      if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild))
+        return i.editReply("Need Manage Server permission.");
+      if (!fs.existsSync(REPO_DEFAULT_PATH)) return i.editReply("Repo bingo.json not found.");
+      const src = JSON.parse(fs.readFileSync(REPO_DEFAULT_PATH, "utf8"));
+      fs.writeFileSync(DATA_PATH, JSON.stringify(src, null, 2));
+      data = loadData(); // reload in-memory
+      return i.editReply(
+        `Reseeded data from repo. Tiles=${(data.tiles || []).length}, RSNs=${
+          Object.keys(data.rsnToTeam || {}).length
+        }`
+      );
+    } catch (err) {
+      console.error("Error in /bingo-reseed:", err);
+      if (!i.replied) try { await i.editReply("Error reseeding."); } catch {}
     }
   }
 });
@@ -662,10 +713,7 @@ app.get("/", (_req, res) => res.send("OK"));
 function verifySignature(rawBody, signature) {
   if (!BINGO_WEBHOOK_SECRET) return true;
   try {
-    const hmac = crypto
-      .createHmac("sha256", BINGO_WEBHOOK_SECRET)
-      .update(rawBody)
-      .digest("hex");
+    const hmac = crypto.createHmac("sha256", BINGO_WEBHOOK_SECRET).update(rawBody).digest("hex");
     return hmac === signature;
   } catch {
     return false;
@@ -723,11 +771,13 @@ client.on("messageCreate", async (msg) => {
   await processParsedDrop(player, team, itemName);
 });
 
-const CELEB = ["🎉","🏆","💎","🔥","🍀","🎯","✨"];
+const CELEB = ["🎉", "🏆", "💎", "🔥", "🍀", "🎯", "✨"];
 
 async function processParsedDrop(rsn, team, itemName) {
   if (!team || team === "Unassigned") {
-    await bingoChannel?.send(`(Heads-up) **${rsn}** isn’t assigned to a team. Use \`/bingo-setteam\`.`);
+    await bingoChannel?.send(
+      `(Heads-up) **${rsn}** isn’t assigned to a team. Use \`/bingo-setteam\`.`
+    );
     return;
   }
 
@@ -744,24 +794,34 @@ async function processParsedDrop(rsn, team, itemName) {
     const c = bucket[tile.key];
 
     // Announce drop line always
-    await bingoChannel?.send(`${CELEB[Math.floor(Math.random()*CELEB.length)]} **${rsn}** (${team}) got **${itemName}**`);
+    await bingoChannel?.send(
+      `${CELEB[Math.floor(Math.random() * CELEB.length)]} **${rsn}** (${team}) got **${itemName}**`
+    );
 
     if (!justCompleted) {
       if (tile.type === "anyCount") {
-        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count}`);
+        await bingoChannel?.send(
+          `Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count}`
+        );
       } else if (tile.type === "orCount") {
-        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count} (or ALT)`);
+        await bingoChannel?.send(
+          `Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count} (or ALT)`
+        );
       } else if (tile.type === "setAll") {
         const have = Object.keys(c.sets.collected || {}).length;
-        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${have}/${tile.set.length}`);
+        await bingoChannel?.send(
+          `Progress (**${team}**): **${tile.name}** — ${have}/${tile.set.length}`
+        );
       } else if (tile.type === "orSetAll") {
         const counts = tile.sets.map((setArr, idx) => {
           const got = Object.keys((c.sets && c.sets[idx]) || {}).length;
           return { got, total: setArr.length };
         });
-        counts.sort((a,b)=>b.got-a.got);
-        const best = counts[0] || { got: 0, total: (tile.sets[0]?.length || 4) };
-        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — best set ${best.got}/${best.total}`);
+        counts.sort((a, b) => b.got - a.got);
+        const best = counts[0] || { got: 0, total: tile.sets[0]?.length || 4 };
+        await bingoChannel?.send(
+          `Progress (**${team}**): **${tile.name}** — best set ${best.got}/${best.total}`
+        );
       }
       saveData(data);
       continue;
@@ -770,7 +830,11 @@ async function processParsedDrop(rsn, team, itemName) {
     saveData(data);
     const embed = new EmbedBuilder()
       .setTitle("Bingo Tile Completed!")
-      .setDescription(`${CELEB[Math.floor(Math.random()*CELEB.length)]} **${rsn}** completed **${tile.name}** for **${team}**`)
+      .setDescription(
+        `${CELEB[Math.floor(Math.random() * CELEB.length)]} **${rsn}** completed **${
+          tile.name
+        }** for **${team}**`
+      )
       .addFields({ name: "Tile Key", value: tile.key, inline: true })
       .setFooter({ text: "OSRS Bingo" });
 
@@ -780,7 +844,9 @@ async function processParsedDrop(rsn, team, itemName) {
 
   // If nothing matched at all, let the channel know
   if (!hitAny) {
-    await bingoChannel?.send(`No tile matched **${itemName}** for **${team}**. (If this should match, tweak the tile regex in \`bingo.json\`.)`);
+    await bingoChannel?.send(
+      `No tile matched **${itemName}** for **${team}**. (If this should match, tweak the tile regex in \`bingo.json\`.)`
+    );
   }
 }
 
@@ -793,4 +859,4 @@ client.login(DISCORD_TOKEN);
 process.on("unhandledRejection", (r) => console.error("[UNHANDLED REJECTION]", r));
 process.on("uncaughtException", (e) => console.error("[UNCAUGHT EXCEPTION]", e));
 process.on("SIGTERM", () => console.log("[SHUTDOWN] SIGTERM received"));
-process.on("SIGINT",  () => console.log("[SHUTDOWN] SIGINT received"));
+process.on("SIGINT", () => console.log("[SHUTDOWN] SIGINT received"));
