@@ -544,19 +544,38 @@ client.on("interactionCreate", async (i) => {
 
   if (i.commandName === "bingo-add") {
   try {
-    await i.deferReply({ flags: 64 });
+    await i.deferReply({ flags: 64 }); // ACK immediately
+
     const team = i.options.getString("team")?.trim();
     const rsn  = i.options.getString("rsn")?.trim();
     const item = i.options.getString("item")?.trim();
-    if (!team || !rsn || !item) return i.editReply("Missing team/rsn/item.");
 
+    if (!team || !rsn || !item) {
+      return i.editReply("Missing team/rsn/item.");
+    }
+
+    console.log("[/bingo-add]", { team, rsn, item });
+
+    // Ensure the team bucket exists so we can store progress safely
+    ensureTeamBucket(team);
+
+    // Call the same path as webhook parsing
+    const before = JSON.stringify(data.completedByTeam?.[team] || {});
     await processParsedDrop(rsn, team, item);
+    const after  = JSON.stringify(data.completedByTeam?.[team] || {});
+
+    // If nothing changed in progress, let the user know.
+    if (before === after) {
+      return i.editReply(`No matching tile for **${item}** on **${team}**. Check your item spelling or tile rules.`);
+    }
+
     return i.editReply(`Recorded **${item}** for **${rsn}** on **${team}**.`);
   } catch (err) {
     console.error("Error in /bingo-add:", err);
-    if (!i.replied) try { await i.editReply("Error adding drop."); } catch {}
+    if (!i.replied) try { await i.editReply("Error adding drop. Check logs."); } catch {}
   }
 }
+
 }
   if (i.commandName === "bingo-setteam") {
   try {
@@ -674,14 +693,22 @@ async function processParsedDrop(rsn, team, itemName) {
     return;
   }
 
+  let hitAny = false;
+
   for (const tile of data.tiles) {
     if (tile.inactive) continue;
     if (!matchTile(tile, itemName)) continue;
+
+    hitAny = true;
 
     const justCompleted = handleProgressForTeam(tile, team, rsn, itemName);
     const bucket = data.completedByTeam[team];
     const c = bucket[tile.key];
 
+    if (!hitAny) {
+    await bingoChannel?.send(`No tile matched **${itemName}** for **${team}**. (If this should match, tweak the tile regex in \`bingo.json\`.)`);
+  }
+  
     // Announce drop line always
     await bingoChannel?.send(`${CELEB[Math.floor(Math.random()*CELEB.length)]} **${rsn}** (${team}) got **${itemName}**`);
 
