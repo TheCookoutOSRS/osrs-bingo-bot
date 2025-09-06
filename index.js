@@ -141,33 +141,7 @@ function handleProgressForTeam(tile, team, rsn, itemName) {
     return false;
   }
 
-  if (tile.type === "orSetAll") {
-  // Support any number of alternative sets (N sets of 4 each)
-  if (!entry.sets) entry.sets = {}; // { "0": { "item": true }, "1": {...}, ... }
-
-  let completedIndex = null;
-
-  for (let s = 0; s < tile.sets.length; s++) {
-    const setArr = tile.sets[s];
-    if (!entry.sets[s]) entry.sets[s] = {};
-    const hit = setArr.find(rx => new RegExp(rx, "i").test(itemName));
-    if (hit) entry.sets[s][hit] = true;
-
-    const allDone = setArr.every(rx => entry.sets[s][rx]);
-    if (allDone) {
-      completedIndex = s;
-      break;
-    }
-  }
-
-  if (completedIndex !== null) {
-    entry.done = true;
-    entry.by = { team, rsn, itemName, ts: Date.now() };
-    entry.sets.completedIndex = completedIndex;
-    return true;
-  }
-  return false;
-}
+  V
 
 
   if (tile.type === "orCount") {
@@ -253,6 +227,42 @@ async function renderBoardBuffer(teamLabel) {
     const tile = data.tiles[i];
     const state = tile?.inactive ? "inactive" : getTileStateForTeam(tile, teamLabel);
 
+// Progress badge for in-progress tiles
+if (!tile?.inactive) {
+  const bucket = (data.completedByTeam?.[teamLabel] || {});
+  const c = bucket[tile.key];
+  if (c && !c.done) {
+    let badge = "";
+    if (tile.type === "anyCount") {
+      badge = `${c.progress?.total || 0}/${tile.count}`;
+    } else if (tile.type === "setAll") {
+      const have = Object.keys(c.sets?.collected || {}).length;
+      badge = `${have}/${tile.set.length}`;
+    } else if (tile.type === "orCount") {
+      if (c.by?.alt) { badge = "ALT"; } else {
+        badge = `${c.progress?.total || 0}/${tile.count}`;
+      }
+    } else if (tile.type === "orSetAll") {
+      const counts = tile.sets.map((setArr, idx) => {
+        const got = Object.keys((c.sets && c.sets[idx]) || {}).length;
+        return { got, total: setArr.length };
+      });
+      const best = counts.sort((a,b)=>b.got-a.got)[0] || { got: 0, total: (tile.sets[0]?.length || 4) };
+      badge = `${best.got}/${best.total}`;
+    }
+
+    if (badge) {
+      // small badge bottom-right
+      const pad = 8;
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillRect(x + cell - 60, y + cell - 28, 52, 20);
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "bold 14px Arial";
+      ctx.fillText(badge, x + cell - 48, y + cell - 14);
+    }
+  }
+}
+
     // Cell background
     if (tile?.inactive) {
       ctx.fillStyle = "#000000";
@@ -337,6 +347,16 @@ client.once("ready", async () => {
             options: [{ name: "team", type: 3, description: "Team name", required: true }]
           },
           {
+  name: "bingo-add",
+  description: "Simulate a drop (manual progress) for a team",
+  options: [
+    { name: "team",  type: 3, description: "Team name", required: true },
+    { name: "rsn",   type: 3, description: "Player RSN", required: true },
+    { name: "item",  type: 3, description: "Item name as it would appear", required: true }
+  ]
+    },
+
+          {
             name: "bingo-mark",
             description: "Manually mark a tile complete for a team (e.g., PET/edge cases)",
             options: [
@@ -354,6 +374,7 @@ client.once("ready", async () => {
             ]
           },
           { name: "bingo-teams", description: "Show current RSN → Team assignments" }
+          
         ],
       }
     );
@@ -520,9 +541,23 @@ client.on("interactionCreate", async (i) => {
       try { await i.editReply("Something went wrong running /bingo-mark. Check logs."); } catch {}
     }
   }
+
+  if (i.commandName === "bingo-add") {
+  try {
+    await i.deferReply({ flags: 64 });
+    const team = i.options.getString("team")?.trim();
+    const rsn  = i.options.getString("rsn")?.trim();
+    const item = i.options.getString("item")?.trim();
+    if (!team || !rsn || !item) return i.editReply("Missing team/rsn/item.");
+
+    await processParsedDrop(rsn, team, item);
+    return i.editReply(`Recorded **${item}** for **${rsn}** on **${team}**.`);
+  } catch (err) {
+    console.error("Error in /bingo-add:", err);
+    if (!i.replied) try { await i.editReply("Error adding drop."); } catch {}
+  }
 }
-
-
+}
   if (i.commandName === "bingo-setteam") {
   try {
     await i.deferReply({ flags: 64 });
@@ -598,29 +633,44 @@ app.post("/drops", (req, res) => {
 // --- Parse webhook posts in #bingo-drops (Dink etc.; team-scoped) ---
 client.on("messageCreate", async (msg) => {
   if (!bingoChannel || msg.channel.id !== bingoChannel.id) return;
+
+  // Accept webhooks/bots only (Dink is a webhook)
   if (!msg.author.bot) return;
 
+  // Gather text
   let text = msg.content || "";
   if (!text && msg.embeds?.length) {
     const e = msg.embeds[0];
-    text = e?.description || e?.title || "";
+    text = [e?.title, e?.description].filter(Boolean).join(" ");
   }
   if (!text) return;
 
+  console.log("[DINK RAW]", text);
+
+  // Try multiple formats
+  // 1) "... by **RSN**: **Item** (ID: 123)"
+  // 2) "**RSN** received **Item** (ID: 123)"
+  // 3) "**RSN**: **Item**"
+  // 4) fallback: "RSN ... Item" (very loose)
   let m =
-    text.match(/by\s+\**(.+?)\**.*?:\s+\**(.+?)\**.*?\(ID:\s*(\d+)\)/i) ||
-    text.match(/^\**?(.+?)\**?.*?received\s+\**(.+?)\**?.*?\(ID[:#]?\s*(\d+)\)/i) ||
+    text.match(/by\s+\**(.+?)\**.*?:\s+\**(.+?)\**/i) ||
+    text.match(/^\**?(.+?)\**?.*?received\s+\**(.+?)\**/i) ||
     text.match(/^\**?(.+?)\**?:\s+\**(.+?)\**/i);
 
-  if (!m) return;
+  if (!m) {
+    console.warn("[DINK PARSE MISS]");
+    return;
+  }
   const [, player, itemName] = m;
   const team = findTeamByRSN(player);
   await processParsedDrop(player, team, itemName);
 });
 
+const CELEB = ["🎉","🏆","💎","🔥","🍀","🎯","✨"];
+
 async function processParsedDrop(rsn, team, itemName) {
   if (!team || team === "Unassigned") {
-    await bingoChannel?.send(`(Heads-up) **${rsn}** is not assigned to a team. Use \`/bingo-setteam\`.`);
+    await bingoChannel?.send(`(Heads-up) **${rsn}** isn’t assigned to a team. Use \`/bingo-setteam\`.`);
     return;
   }
 
@@ -632,29 +682,26 @@ async function processParsedDrop(rsn, team, itemName) {
     const bucket = data.completedByTeam[team];
     const c = bucket[tile.key];
 
+    // Announce drop line always
+    await bingoChannel?.send(`${CELEB[Math.floor(Math.random()*CELEB.length)]} **${rsn}** (${team}) got **${itemName}**`);
+
     if (!justCompleted) {
       if (tile.type === "anyCount") {
         await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count}`);
       } else if (tile.type === "orCount") {
-        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count} (or alt)`);
+        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count} (or ALT)`);
       } else if (tile.type === "setAll") {
         const have = Object.keys(c.sets.collected || {}).length;
         await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${have}/${tile.set.length}`);
       } else if (tile.type === "orSetAll") {
-  // Show best progress across all alternative sets (supports N sets)
-  const counts = tile.sets.map((setArr, idx) => {
-    const got = Object.keys((c.sets && c.sets[idx]) || {}).length;
-    return { idx, got, total: setArr.length };
-  });
-
-  counts.sort((a, b) => b.got - a.got);
-  const best = counts[0] || { got: 0, total: (tile.sets[0]?.length || 4) };
-
-  await bingoChannel?.send(
-    `Progress (**${team}**): **${tile.name}** — best set ${best.got}/${best.total}`
-  );
-}
-
+        const counts = tile.sets.map((setArr, idx) => {
+          const got = Object.keys((c.sets && c.sets[idx]) || {}).length;
+          return { got, total: setArr.length };
+        });
+        counts.sort((a,b)=>b.got-a.got);
+        const best = counts[0] || { got: 0, total: (tile.sets[0]?.length || 4) };
+        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — best set ${best.got}/${best.total}`);
+      }
       saveData(data);
       continue;
     }
@@ -662,7 +709,7 @@ async function processParsedDrop(rsn, team, itemName) {
     saveData(data);
     const embed = new EmbedBuilder()
       .setTitle("Bingo Tile Completed!")
-      .setDescription(`**${rsn}** completed **${tile.name}** for **${team}**`)
+      .setDescription(`${CELEB[Math.floor(Math.random()*CELEB.length)]} **${rsn}** completed **${tile.name}** for **${team}**`)
       .addFields({ name: "Tile Key", value: tile.key, inline: true })
       .setFooter({ text: "OSRS Bingo" });
 
@@ -670,6 +717,7 @@ async function processParsedDrop(rsn, team, itemName) {
     await postBoardImage(bingoChannel, team);
   }
 }
+
 
 // --- Start HTTP + Discord ---
 const PORT = process.env.PORT || 3000;
