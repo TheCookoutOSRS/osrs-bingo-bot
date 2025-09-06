@@ -26,7 +26,7 @@
   },
   "tiles": [
     {
-      "key": "t1_whip_dagger_bludgeon_jar",
+      "key": "sire",
       "name": "Abyssal/Bludgeon/Jar of miasma group",
       "type": "single",
       "matches": [
@@ -39,13 +39,13 @@
       ]
     },
     {
-      "key": "t2_mutagen",
+      "key": "mutagen",
       "name": "Tanzanite or Magma mutagen",
       "type": "single",
       "matches": ["tanzanite\\s+mutagen", "magma\\s+mutagen"]
     },
     {
-  "key": "t3_barrows_full_set",
+  "key": "barrows",
   "name": "Barrows: complete any full set",
   "type": "orSetAll",
   "sets": [
@@ -59,37 +59,37 @@
   },
     
     {
-      "key": "t4_dclaws_dhb_dhcb",
+      "key": "cox weps",
       "name": "Dragon claws / Dinh's bulwark / DHCB",
       "type": "single",
       "matches": ["dragon\\s+claws", "dinh'?s\\s+bulwark", "dragon\\s+hunter\\s+crossbow"]
     },
     {
-      "key": "t5_araxyte_noxious",
+      "key": "arax",
       "name": "Araxyte/Noxious piece",
       "type": "single",
       "matches": ["araxyte\\s+fang", "noxious\\s+blade", "noxious\\s+point", "noxious\\s+pommel"]
     },
     {
-      "key": "t6_oathplate_soulflame",
+      "key": "yama",
       "name": "Oathplate or Soulflame horn",
       "type": "single",
       "matches": ["oathplate\\s+helm", "oathplate\\s+chest", "oathplate\\s+legs", "soulflame\\s+horn"]
     },
     {
-      "key": "t7_crystal_tool_seed",
+      "key": "tool seed",
       "name": "Crystal tool seed",
       "type": "single",
       "matches": ["crystal\\s+tool\\s+seed"]
     },
     {
-      "key": "t8_dk_rings",
+      "key": "dk rings",
       "name": "DKs Rings",
       "type": "single",
       "matches": ["archers\\s+ring", "warrior\\s+ring", "seers\\s+ring", "berserker\\s+ring"]
     },
     {
-      "key": "t9_pet",
+      "key": "pet",
       "name": "Pet (funny feeling...)",
       "type": "pet",
       "matches": [
@@ -99,25 +99,25 @@
       ]
     },
     {
-      "key": "t10_masori",
+      "key": "masori",
       "name": "Masori piece",
       "type": "single",
       "matches": ["masori\\s+mask", "masori\\s+body", "masori\\s+chaps"]
     },
     {
-      "key": "t11_tombs_uniques",
+      "key": "toa misq",
       "name": "ToA uniques",
       "type": "single",
       "matches": ["osmumten'?s\\s+fang", "elidinis'?\\s+ward", "lightbearer"]
     },
     {
-      "key": "t12_trident",
+      "key": "kraken",
       "name": "Trident of the seas (full)",
       "type": "single",
       "matches": ["tr[iy]dent\\s+of\\s+the\\s+seas\\s*\\(full\\)"]
     },
     {
-      "key": "t13_big_uniques",
+      "key": "megas",
       "name": "Big raid uniques",
       "type": "single",
       "matches": [
@@ -129,20 +129,20 @@
       ]
     },
     {
-      "key": "t14_snake_trio_any3",
+      "key": "zulrah",
       "name": "Get any 3: Magic fang / Tanz fang / Serp visage",
       "type": "anyCount",
       "count": 3,
       "sources": ["magic\\s+fang", "tanzanite\\s+fang", "serpentine\\s+visage"]
     },
     {
-      "key": "t15_smoke_bstaff",
+      "key": "thermy",
       "name": "Smoke battlestaff",
       "type": "single",
       "matches": ["smoke\\s+battlestaff"]
     },
     {
-      "key": "t16_shards_sets",
+      "key": "wildy",
       "name": "Odium 1–3 OR Malediction 1–3",
       "type": "orSetAll",
       "sets": [
@@ -151,7 +151,7 @@
       ]
     },
     {
-      "key": "t17_dt2_any2",
+      "key": "doom",
       "name": "Any 2: Avernic treads / Mokhaiotl cloth / Eye of ayak (uncharged)",
       "type": "anyCount",
       "count": 2,
@@ -162,7 +162,7 @@
       ]
     },
     {
-      "key": "t18_echo_or_ralos",
+      "key": "sol",
       "name": "5x Echo crystal OR Tonalztics of Ralos (uncharged)",
       "type": "orCount",
       "count": 5,
@@ -170,7 +170,7 @@
       "alternativeMatches": ["tonalztics\\s+of\\s+ralos\\s*\\(uncharged\\)"]
     },
     {
-      "key": "t19_nightmare_uniques",
+      "key": "nm",
       "name": "Nightmare/Phosani uniques",
       "type": "single",
       "matches": [
@@ -186,37 +186,37 @@
       ]
     },
     {
-      "key": "t20_ancestral",
+      "key": "ancestral",
       "name": "Ancestral piece",
       "type": "single",
       "matches": ["ancestral\\s+hat", "ancestral\\s+robe\\s+top", "ancestral\\s+robe\\s+bottom"]
     },
     {
-      "key": "t21_tob_uniques",
+      "key": "tob",
       "name": "ToB uniques",
       "type": "single",
       "matches": ["ghrazi\\s+rapier", "sanguinesti\\s+staff\\s*\\(uncharged\\)"]
     },
     {
-      "key": "t22_venator_shard",
+      "key": "venator",
       "name": "Venator shard",
       "type": "single",
       "matches": ["venator\\s+shard"]
     },
     {
-      "key": "t23_justiciar",
+      "key": "justiciar",
       "name": "Justiciar piece",
       "type": "single",
       "matches": ["justiciar\\s+faceguard", "justiciar\\s+chestguard", "justiciar\\s+legguards"]
     },
     {
-      "key": "t24_prims_eternal_peg_all",
+      "key": "cerb",
       "name": "Primordial + Eternal + Pegasian (all three)",
       "type": "setAll",
       "set": ["primordial\\s+crystal", "eternal\\s+crystal", "pegasian\\s+crystal"]
     },
     {
-      "key": "t25_granite_ancient",
+      "key": "ggs",
       "name": "Granite items / Core / Jar of stone",
       "type": "single",
       "matches": [
