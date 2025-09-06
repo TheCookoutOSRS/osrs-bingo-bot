@@ -13,7 +13,7 @@ import {
   EmbedBuilder,
   PermissionsBitField,
 } from "discord.js";
-import { createCanvas } from "canvas";
+import { createCanvas } from "@napi-rs/canvas";
 
 const app = express();
 app.use(bodyParser.json());
