@@ -753,9 +753,17 @@ async function processParsedDrop(rsn, team, itemName) {
 }
 
 // --- Start HTTP + Discord ---
+// at the very bottom, where you currently start HTTP and login
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`HTTP listening on ${PORT}`));
-client.login(DISCORD_TOKEN);
+
+if (process.env.RUN_BOT !== "false") {
+  client.login(DISCORD_TOKEN);
+  console.log("[BOT] Discord client login started (RUN_BOT!=false)");
+} else {
+  console.log("[BOT] Skipped Discord login because RUN_BOT=false");
+}
+
 
 // Crash guards
 process.on("unhandledRejection", (r) => console.error("[UNHANDLED REJECTION]", r));
