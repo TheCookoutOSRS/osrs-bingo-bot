@@ -330,11 +330,7 @@ client.once("ready", async () => {
             options: [{ name: "channel", type: 7, description: "Target channel", required: true }],
           },
           { name: "bingo-password", description: "Reveal the bingo password (and start time)" },
-          {
-            name: "bingo-status",
-            description: "Show completion summary for a team",
-            options: [{ name: "team", type: 3, description: "Team name", required: true }]
-          },
+
           {
             name: "bingo-board",
             description: "Post the current visual bingo board image for a team",
