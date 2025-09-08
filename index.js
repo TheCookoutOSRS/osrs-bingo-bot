@@ -499,7 +499,16 @@ client.once("ready", async () => {
   options: [
     { name: "rsn", type: 3, description: "Player RSN", required: true, autocomplete: true }
   ]
+},
+{
+  name: "bingo-unmark",
+  description: "Undo a marked or partial tile for a team",
+  options: [
+    { name: "tilekey", type: 3, description: "Tile key", required: true },
+    { name: "team", type: 3, description: "Team name", required: true }
+  ]
 }
+
 
         ],
       }
@@ -814,6 +823,36 @@ if (i.commandName === "bingo-unsetteam") {
     const lines = Object.keys(byTeam).sort().map(team => `**${team}**: ${byTeam[team].join(", ")}`);
     return i.reply({ flags: 64, content: lines.join("\n") });
   }
+  if (i.commandName === "bingo-unmark") {
+  try {
+    await i.deferReply({ flags: 64 });
+
+    const key = i.options.getString("tilekey");
+    const team = i.options.getString("team");
+
+    const tile = data.tiles.find(t => t.key === key);
+    if (!tile) return i.editReply("Unknown tile key.");
+
+    const bucket = data.completedByTeam[team];
+    if (!bucket || !bucket[key]) {
+      return i.editReply(`Tile \`${key}\` wasn’t marked for **${team}**.`);
+    }
+
+    // Reset that tile’s state
+    delete bucket[key];
+    saveData(data);
+
+    await i.editReply(`Tile \`${key}\` has been unmarked/reset for **${team}**.`);
+
+    // Optional: repost updated board
+    if (bingoChannel) await postBoardImage(bingoChannel, team);
+
+  } catch (err) {
+    console.error("Error in /bingo-unmark:", err);
+    if (!i.replied) try { await i.editReply("Error unmarking tile."); } catch {}
+  }
+}
+
 });
 
 // --- Health check ---
