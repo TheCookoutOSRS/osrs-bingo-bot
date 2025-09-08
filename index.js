@@ -261,59 +261,66 @@ async function renderBoardBuffer(teamLabel) {
   const team = normalizeTeamName(teamLabel);
   ensureTeamBucket(team);
 
-  const size = 1000;
+  // --- Layout constants ---
   const grid = 5;
-  const titleH = 70;
-  const pad = 12;
-  const cell = size / grid;
+  const boardWidth = 1100;   // square play area for 5x5 grid (higher res)
+  const titleH = 120;        // taller header so it’s readable
+  const pad = 14;            // inner cell text padding
+  const cell = boardWidth / grid;
 
-  const canvas = createCanvas(size, size);
+  const width  = boardWidth;            // image width
+  const height = titleH + boardWidth;   // image height = title + board area
+
+  const canvas = createCanvas(width, height);
   const ctx = canvas.getContext("2d");
 
   // Background & title
-  ctx.fillStyle = "#1f2937"; // slate-800
-  ctx.fillRect(0, 0, size, size);
-  ctx.fillStyle = "#111827"; // slate-900
-  ctx.fillRect(0, 0, size, titleH);
-  ctx.fillStyle = "#e5e7eb"; // gray-200
-  ctx.font = "bold 28px Arial";
-  ctx.fillText("Fall Bingo Cookout", 20, 42);
-  ctx.font = "bold 20px Arial";
-  ctx.fillText(`Team: ${team}`, 20, 64);
+  ctx.fillStyle = "#000000ff"; // slate-800
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#3f3f3fff"; // slate-900 (title bar)
+  ctx.fillRect(0, 0, width, titleH);
 
+  ctx.fillStyle = "#e5e7eb"; // gray-200
+  ctx.font = "bold 34px Arial";
+  ctx.fillText("Fall Bingo Cookout", 24, 58);
+  ctx.font = "bold 22px Arial";
+  ctx.fillText(`Team: ${team}`, 24, 92);
+
+  // Draw cells
   for (let i = 0; i < data.tiles.length; i++) {
     const row = Math.floor(i / grid);
     const col = i % grid;
+
     const x = col * cell;
-    const y = row * cell + titleH;
+    const y = titleH + row * cell; // note: start after title bar
 
     const tile = data.tiles[i];
     const state = tile?.inactive ? "inactive" : getTileStateForTeam(tile, team);
 
     // Cell background
     if (tile?.inactive) {
-      ctx.fillStyle = "#000000";
+      ctx.fillStyle = "#000000ff";
     } else {
-      ctx.fillStyle = state === "done" ? "#14532d" : "#374151";
+      ctx.fillStyle = state === "done" ? "#14532d" : "#374151"; // green-900 / gray-700
     }
     ctx.fillRect(x, y, cell, cell);
 
     // Border
-    ctx.strokeStyle = "#9ca3af";
+    ctx.strokeStyle = "#ffffffff"; // gray-400
     ctx.lineWidth = 2;
     ctx.strokeRect(x, y, cell, cell);
 
-    // Text
+    // Tile label
     if (tile) {
-      ctx.fillStyle = "#e5e7eb";
-      ctx.font = "bold 18px Arial";
+      ctx.fillStyle = "#ffffffff";
+      ctx.font = "bold 20px Arial";             // slightly larger
       const textX = x + pad;
-      const textY = y + 28;
+      const textY = y + 30;
       const maxWidth = cell - pad * 2;
-      wrapText(ctx, tile.name, textX, textY, maxWidth, 22);
+      wrapText(ctx, tile.name, textX, textY, maxWidth, 24); // slightly larger line height
     }
 
-    // Progress badge (safe)
+    // Progress badge (larger & clearer)
     try {
       if (!tile?.inactive) {
         const bucket = (data.completedByTeam?.[team] || {});
@@ -344,12 +351,12 @@ async function renderBoardBuffer(teamLabel) {
           }
 
           if (badge) {
-            const padBR = 8;
-            ctx.fillStyle = "rgba(0,0,0,0.6)";
-            ctx.fillRect(x + cell - 60, y + cell - 28, 52, 20);
+            const bw = 80, bh = 30; // bigger badge
+            ctx.fillStyle = "rgba(255, 0, 212, 0.78)";
+            ctx.fillRect(x + cell - bw - 10, y + cell - bh - 10, bw, bh);
             ctx.fillStyle = "#e5e7eb";
-            ctx.font = "bold 14px Arial";
-            ctx.fillText(badge, x + cell - 48, y + cell - 14);
+            ctx.font = "bold 18px Arial"; // bigger text
+            ctx.fillText(badge, x + cell - bw + 10, y + cell - 12);
           }
         }
       }
@@ -357,20 +364,21 @@ async function renderBoardBuffer(teamLabel) {
       console.error("[BOARD] badge render error for tile", tile?.key, "team", team, e);
     }
 
-    // Checkmark overlay
+    // Checkmark overlay (a bit thicker)
     if (!tile?.inactive && state === "done") {
-      ctx.strokeStyle = "#22c55e";
-      ctx.lineWidth = 10;
+      ctx.strokeStyle = "#22c55e"; // green-500
+      ctx.lineWidth = 12;
       ctx.beginPath();
-      ctx.moveTo(x + cell * 0.2, y + cell * 0.55);
-      ctx.lineTo(x + cell * 0.4, y + cell * 0.75);
-      ctx.lineTo(x + cell * 0.8, y + cell * 0.3);
+      ctx.moveTo(x + cell * 0.18, y + cell * 0.58);
+      ctx.lineTo(x + cell * 0.40, y + cell * 0.78);
+      ctx.lineTo(x + cell * 0.82, y + cell * 0.32);
       ctx.stroke();
     }
   }
 
   return canvas.toBuffer("image/png");
 }
+
 
 async function postBoardImage(targetChannel, teamLabel, note = "") {
   const ch = targetChannel || bingoChannel;
