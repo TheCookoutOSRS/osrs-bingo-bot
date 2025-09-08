@@ -34,7 +34,6 @@ console.log(
 );
 
 // --- Data layer ---
-// --- Data layer ---
 const DEFAULT_REPO_PATH = "./bingo.json";
 const DATA_PATH = process.env.DATA_PATH || DEFAULT_REPO_PATH;
 
@@ -42,18 +41,16 @@ function initDataFile() {
   const onDisk = fs.existsSync(DATA_PATH);
   const inRepo = fs.existsSync(DEFAULT_REPO_PATH);
 
-  // If using a mounted disk path and it doesn't exist yet, seed from repo copy if present
   if (!onDisk && DATA_PATH !== DEFAULT_REPO_PATH && inRepo) {
     try {
       fs.copyFileSync(DEFAULT_REPO_PATH, DATA_PATH);
-      console.log(`[DATA] Seeded ${DATA_PATH} from repo ${DEFAULT_REPO_PATH}`);
+      console.log(`[DATA] Seeded ${DATA_PATH} from ${DEFAULT_REPO_PATH}`);
       return;
     } catch (e) {
       console.warn("[DATA] Failed to seed from repo:", e);
     }
   }
 
-  // If no file anywhere, create a fresh skeleton
   if (!onDisk && !inRepo) {
     const empty = {
       rsnToTeam: {},
@@ -70,7 +67,6 @@ function loadData() {
   initDataFile();
   const d = JSON.parse(fs.readFileSync(DATA_PATH, "utf8"));
 
-  // migrate legacy
   if (d.completed && !d.completedByTeam) {
     console.warn("[MIGRATE] Found legacy 'completed'. Creating completedByTeam.GLOBAL.");
     d.completedByTeam = { GLOBAL: d.completed };
@@ -78,14 +74,25 @@ function loadData() {
     fs.writeFileSync(DATA_PATH, JSON.stringify(d, null, 2));
   }
   if (!d.completedByTeam) d.completedByTeam = {};
+
+  // debug: log where we loaded from and when it was last modified
+  try {
+    const stat = fs.statSync(DATA_PATH);
+    console.log(`[DATA] Loaded ${DATA_PATH} (mtime ${new Date(stat.mtimeMs).toISOString()})`);
+  } catch {}
   return d;
 }
 
 function saveData(d) {
   fs.writeFileSync(DATA_PATH, JSON.stringify(d, null, 2));
+  try {
+    const stat = fs.statSync(DATA_PATH);
+    console.log(`[DATA] Saved ${DATA_PATH} (mtime ${new Date(stat.mtimeMs).toISOString()})`);
+  } catch {}
 }
 
 let data = loadData();
+
 
 
 // ------- Helpers -------
