@@ -456,7 +456,22 @@ client.once("ready", async () => {
             options: [
               { name: "team", type: 3, description: "Team name", required: true, autocomplete: true }
             ]
-          }
+          },
+          {
+  name: "bingo-deleteteam",
+  description: "Remove a team bucket and unassign RSNs from that team",
+  options: [
+    { name: "team", type: 3, description: "Team name", required: true, autocomplete: true }
+  ]
+},
+{
+  name: "bingo-unsetteam",
+  description: "Remove a single RSN→Team assignment",
+  options: [
+    { name: "rsn", type: 3, description: "Player RSN", required: true, autocomplete: true }
+  ]
+}
+
         ],
       }
     );
@@ -510,6 +525,59 @@ client.on("interactionCreate", async (i) => {
       console.error("[AUTOCOMPLETE] error:", e);
       try { await i.respond([]); } catch {}
     }
+    if (i.commandName === "bingo-deleteteam") {
+  try {
+    await i.deferReply({ flags: 64 });
+    if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild))
+      return i.editReply("Need Manage Server permission.");
+
+    const teamRaw = i.options.getString("team");
+    const team = normalizeTeamName(teamRaw || "");
+    if (!team) return i.editReply("Team is required.");
+
+    // Unassign RSNs that point to this team
+    const removed = [];
+    for (const [rsn, t] of Object.entries(data.rsnToTeam || {})) {
+      if (normalizeTeamName(t) === team) {
+        delete data.rsnToTeam[rsn];
+        removed.push(rsn);
+      }
+    }
+    // Remove team progress bucket
+    if (data.completedByTeam?.[team]) {
+      delete data.completedByTeam[team];
+    }
+    saveData(data);
+
+    return i.editReply(`Deleted team **${team}**. Unassigned RSNs: ${removed.length ? removed.join(", ") : "(none)"}`);
+  } catch (err) {
+    console.error("Error in /bingo-deleteteam:", err);
+    if (!i.replied) try { await i.editReply("Error deleting team."); } catch {}
+  }
+}
+
+if (i.commandName === "bingo-unsetteam") {
+  try {
+    await i.deferReply({ flags: 64 });
+    if (!i.member.permissions.has(PermissionsBitField.Flags.ManageGuild))
+      return i.editReply("Need Manage Server permission.");
+
+    const rsn = i.options.getString("rsn")?.trim();
+    if (!rsn) return i.editReply("RSN is required.");
+
+    if (data.rsnToTeam?.[rsn]) {
+      delete data.rsnToTeam[rsn];
+      saveData(data);
+      return i.editReply(`Unassigned **${rsn}** from any team.`);
+    } else {
+      return i.editReply(`**${rsn}** wasn’t assigned to a team.`);
+    }
+  } catch (err) {
+    console.error("Error in /bingo-unsetteam:", err);
+    if (!i.replied) try { await i.editReply("Error unassigning RSN."); } catch {}
+  }
+}
+
     return; // don't fall through
   }
 
@@ -757,31 +825,68 @@ app.post("/drops", (req, res) => {
 
 // --- Parse webhook posts in #bingo-drops (Dink etc.; team-scoped) ---
 client.on("messageCreate", async (msg) => {
+  // Must be in the configured channel
   if (!bingoChannel || msg.channel.id !== bingoChannel.id) return;
+
+  // We only expect webhooks/bots from Dink here
   if (!msg.author.bot) return;
 
+  // Gather best-effort text to parse
   let text = msg.content || "";
   if (!text && msg.embeds?.length) {
     const e = msg.embeds[0];
-    text = [e?.title, e?.description].filter(Boolean).join(" ");
+    const parts = [
+      e?.title,
+      e?.description,
+      ...(Array.isArray(e?.fields) ? e.fields.flatMap(f => [f?.name, f?.value]) : [])
+    ].filter(Boolean);
+    text = parts.join("\n");
   }
+
+  console.log("[DINK RAW] --------");
+  console.log("author:", msg.author?.username, "webhookId:", msg.webhookId);
+  console.log("content:\n", msg.content || "(none)");
+  if (msg.embeds?.length) console.log("embed0:", JSON.stringify(msg.embeds[0], null, 2));
+  console.log("-------------------");
+
   if (!text) return;
 
-  console.log("[DINK RAW]", text);
+  // Try several common patterns. We capture player first, then item.
+  // 1) "**RSN** received **Item**"
+  // 2) "Drop logged by **RSN**: **Item**"
+  // 3) "**RSN**: **Item**"
+  // 4) Lines like "Player: RSN" & "Item: Item Name"
+  let player = null;
+  let itemName = null;
 
   let m =
-    text.match(/by\s+\**(.+?)\**.*?:\s+\**(.+?)\**/i) ||
-    text.match(/^\**?(.+?)\**?.*?received\s+\**(.+?)\**/i) ||
-    text.match(/^\**?(.+?)\**?:\s+\**(.+?)\**/i);
+    text.match(/\*\*([^*]+)\*\*.*?received\s+\*\*([^*]+)\*\*/i) ||
+    text.match(/by\s+\*\*([^*]+)\*\*.*?:\s+\*\*([^*]+)\*\*/i) ||
+    text.match(/^\s*\*\*?([^*]+)\*?\*\s*:\s*\*\*([^*]+)\*\*/im);
 
-  if (!m) {
-    console.warn("[DINK PARSE MISS]");
+  if (m) {
+    [, player, itemName] = m;
+  } else {
+    // Fallback: sniff “Player:” and “Item:” style lines anywhere in text
+    const pl = text.match(/^\s*player\s*:\s*([^\n\r]+)/im);
+    const it = text.match(/^\s*item\s*:\s*([^\n\r]+)/im);
+    if (pl && it) {
+      player = pl[1].trim();
+      itemName = it[1].trim();
+    }
+  }
+
+  console.log("[DINK PARSE]", { player, itemName });
+
+  if (!player || !itemName) {
+    console.warn("[DINK PARSE MISS] No match. Tweak regex if Dink format differs.");
     return;
   }
-  const [, player, itemName] = m;
+
   const team = findTeamByRSN(player);
   await processParsedDrop(player, team, itemName);
 });
+
 
 const CELEB = ["🎉","🏆","💎","🔥","🍀","🎯","✨"];
 
