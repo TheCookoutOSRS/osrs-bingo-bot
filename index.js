@@ -34,22 +34,40 @@ console.log(
 );
 
 // --- Data layer ---
-const DATA_PATH = "./bingo.json";
-function loadData() {
-  if (!fs.existsSync(DATA_PATH)) {
-    fs.writeFileSync(
-      DATA_PATH,
-      JSON.stringify(
-        {
-          rsnToTeam: {},      // { "RSN": "Team Name" }
-          tiles: [],          // tile rules
-          completedByTeam: {},// { "Team": { tileKey: {done, by, progress...} } }
-          channelId: ""
-        },
-        null, 2
-      )
-    );
+// --- Data layer ---
+const DEFAULT_REPO_PATH = "./bingo.json";
+const DATA_PATH = process.env.DATA_PATH || DEFAULT_REPO_PATH;
+
+function initDataFile() {
+  const onDisk = fs.existsSync(DATA_PATH);
+  const inRepo = fs.existsSync(DEFAULT_REPO_PATH);
+
+  // If using a mounted disk path and it doesn't exist yet, seed from repo copy if present
+  if (!onDisk && DATA_PATH !== DEFAULT_REPO_PATH && inRepo) {
+    try {
+      fs.copyFileSync(DEFAULT_REPO_PATH, DATA_PATH);
+      console.log(`[DATA] Seeded ${DATA_PATH} from repo ${DEFAULT_REPO_PATH}`);
+      return;
+    } catch (e) {
+      console.warn("[DATA] Failed to seed from repo:", e);
+    }
   }
+
+  // If no file anywhere, create a fresh skeleton
+  if (!onDisk && !inRepo) {
+    const empty = {
+      rsnToTeam: {},
+      tiles: [],
+      completedByTeam: {},
+      channelId: ""
+    };
+    fs.writeFileSync(DATA_PATH, JSON.stringify(empty, null, 2));
+    console.log(`[DATA] Created new data file at ${DATA_PATH}`);
+  }
+}
+
+function loadData() {
+  initDataFile();
   const d = JSON.parse(fs.readFileSync(DATA_PATH, "utf8"));
 
   // migrate legacy
@@ -62,10 +80,13 @@ function loadData() {
   if (!d.completedByTeam) d.completedByTeam = {};
   return d;
 }
+
 function saveData(d) {
   fs.writeFileSync(DATA_PATH, JSON.stringify(d, null, 2));
 }
+
 let data = loadData();
+
 
 // ------- Helpers -------
 function normalizeTeamName(s = "") {
@@ -301,7 +322,7 @@ async function renderBoardBuffer(teamLabel) {
     if (tile?.inactive) {
       ctx.fillStyle = "#000000ff";
     } else {
-      ctx.fillStyle = state === "done" ? "#14532d" : "#374151"; // green-900 / gray-700
+      ctx.fillStyle = state === "done" ? "#14532d" : "#000000ff"; // green-900 / gray-700
     }
     ctx.fillRect(x, y, cell, cell);
 
@@ -352,7 +373,7 @@ async function renderBoardBuffer(teamLabel) {
 
           if (badge) {
             const bw = 80, bh = 30; // bigger badge
-            ctx.fillStyle = "rgba(255, 0, 212, 0.78)";
+            ctx.fillStyle = "rgba(0, 0, 0, 0.78)";
             ctx.fillRect(x + cell - bw - 10, y + cell - bh - 10, bw, bh);
             ctx.fillStyle = "#e5e7eb";
             ctx.font = "bold 18px Arial"; // bigger text
