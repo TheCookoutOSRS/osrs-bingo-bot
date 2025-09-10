@@ -898,63 +898,79 @@ app.post("/drops", (req, res) => {
   return res.json({ ok: true });
 });
 
-// --- Parse webhook posts in #bingo-drops (Dink etc.; team-scoped) ---
+// Replace your current client.on("messageCreate", ...) with this:
 client.on("messageCreate", async (msg) => {
-  // Must be in the configured channel
+  // Only listen in the configured channel
   if (!bingoChannel || msg.channel.id !== bingoChannel.id) return;
 
-  // We only expect webhooks/bots from Dink here
+  // Dink posts via webhook/bot
   if (!msg.author.bot) return;
 
-  // Gather best-effort text to parse
-  let text = msg.content || "";
-  if (!text && msg.embeds?.length) {
-    const e = msg.embeds[0];
-    const parts = [
-      e?.title,
-      e?.description,
-      ...(Array.isArray(e?.fields) ? e.fields.flatMap(f => [f?.name, f?.value]) : [])
-    ].filter(Boolean);
-    text = parts.join("\n");
+  const e = msg.embeds?.[0];
+  const rawContent = msg.content || "";
+  const authorName = e?.author?.name || "";
+  const title = e?.title || "";
+  const desc = e?.description || "";
+
+  // Build text corpus
+  const parts = [
+    authorName, title, desc,
+    ...(Array.isArray(e?.fields) ? e.fields.flatMap(f => [f?.name, f?.value]) : []),
+    rawContent
+  ].filter(Boolean);
+  const text = parts.join("\n");
+
+  console.log("[DINK RAW] ----------");
+  console.log("author:", msg.author?.username, "webhookId:", msg.webhookId);
+  if (e) console.log("embed snapshot:", JSON.stringify({
+    author: e.author, title: e.title, description: e.description, fields: e.fields
+  }, null, 2));
+  console.log("---------------------");
+
+  // Parse player (RSN)
+  // 1) Some Dink templates put RSN as the first line of the description (e.g., "Bloviating")
+  //    followed by "has looted:"
+  let player = null;
+
+  // A: "Bloviating has looted:"
+  let mPl = text.match(/^([A-Za-z0-9 _\-]+)\s+has\s+looted\s*:?\s*$/im);
+  if (mPl) player = mPl[1].trim();
+
+  // B: If not, the first non-empty line of description often IS the RSN
+  if (!player && desc) {
+    const first = desc.split(/\r?\n/).map(s => s.trim()).find(Boolean);
+    if (first && !/has\s+looted/i.test(first)) player = first;
   }
 
-  console.log("[DINK RAW] --------");
-  console.log("author:", msg.author?.username, "webhookId:", msg.webhookId);
-  console.log("content:\n", msg.content || "(none)");
-  if (msg.embeds?.length) console.log("embed0:", JSON.stringify(msg.embeds[0], null, 2));
-  console.log("-------------------");
+  // C: Fallback: embed author sometimes carries RSN
+  if (!player && authorName) player = authorName.trim();
 
-  if (!text) return;
+  // D: Fallback: first non-empty content line
+  if (!player && rawContent) {
+    const first = rawContent.split(/\r?\n/).map(s => s.trim()).find(Boolean);
+    if (first) player = first;
+  }
 
-  // Try several common patterns. We capture player first, then item.
-  // 1) "**RSN** received **Item**"
-  // 2) "Drop logged by **RSN**: **Item**"
-  // 3) "**RSN**: **Item**"
-  // 4) Lines like "Player: RSN" & "Item: Item Name"
-  let player = null;
+  // Parse item line like "1 x Pegasian crystal (160K)" → "Pegasian crystal"
   let itemName = null;
+  const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  for (const line of lines) {
+    // "1 x Item Name (price)" or "2 x Item Name"
+    let m = line.match(/\b\d+\s*x\s+([^(]+?)(?:\s*\([^)]*\))?$/i);
+    if (m) { itemName = m[1].trim(); break; }
+    // "Item: Item Name (price)"
+    m = line.match(/^item\s*:\s*([^(]+?)(?:\s*\([^)]*\))?$/i);
+    if (m) { itemName = m[1].trim(); break; }
+  }
 
-  let m =
-    text.match(/\*\*([^*]+)\*\*.*?received\s+\*\*([^*]+)\*\*/i) ||
-    text.match(/by\s+\*\*([^*]+)\*\*.*?:\s+\*\*([^*]+)\*\*/i) ||
-    text.match(/^\s*\*\*?([^*]+)\*?\*\s*:\s*\*\*([^*]+)\*\*/im);
-
-  if (m) {
-    [, player, itemName] = m;
-  } else {
-    // Fallback: sniff “Player:” and “Item:” style lines anywhere in text
-    const pl = text.match(/^\s*player\s*:\s*([^\n\r]+)/im);
-    const it = text.match(/^\s*item\s*:\s*([^\n\r]+)/im);
-    if (pl && it) {
-      player = pl[1].trim();
-      itemName = it[1].trim();
-    }
+  if (itemName) {
+    itemName = itemName.replace(/[’]/g, "'").replace(/\s{2,}/g, " ").trim();
   }
 
   console.log("[DINK PARSE]", { player, itemName });
 
   if (!player || !itemName) {
-    console.warn("[DINK PARSE MISS] No match. Tweak regex if Dink format differs.");
+    console.warn("[DINK PARSE MISS] Could not extract player or item from Dink embed.");
     return;
   }
 
@@ -963,66 +979,82 @@ client.on("messageCreate", async (msg) => {
 });
 
 
+
+// Replace your current processParsedDrop with this:
 const CELEB = ["🎉","🏆","💎","🔥","🍀","🎯","✨"];
 
-async function processParsedDrop(rsn, teamRaw, itemName) {
-  const team = normalizeTeamName(teamRaw);
+async function processParsedDrop(rsn, team, itemName) {
+  if (!bingoChannel) return;
+
   if (!team || team === "Unassigned") {
-    await bingoChannel?.send(`(Heads-up) **${rsn}** isn’t assigned to a team. Use \`/bingo-setteam\`.`);
+    await bingoChannel.send(`Heads-up: **${rsn}** isn’t assigned to a team. Use \`/bingo-setteam\`.`);
     return;
   }
 
-  let hitAny = false;
+  let matchedAny = false;
+  let completedSomething = false;
 
   for (const tile of data.tiles) {
     if (tile.inactive) continue;
     if (!matchTile(tile, itemName)) continue;
 
-    hitAny = true;
+    matchedAny = true;
 
+    // ensure bucket exists
+    ensureTeamBucket(team);
+
+    // update progress
     const justCompleted = handleProgressForTeam(tile, team, rsn, itemName);
-    const bucket = ensureTeamBucket(team);
+    const bucket = data.completedByTeam[team];
     const c = bucket[tile.key];
 
-    // Announce drop line always
-    await bingoChannel?.send(`${CELEB[Math.floor(Math.random()*CELEB.length)]} **${rsn}** (${team}) got **${itemName}**`);
+    // Congratulate on the drop itself
+    await bingoChannel.send(`${CELEB[Math.floor(Math.random()*CELEB.length)]} **${rsn}** (${team}) got **${itemName}**`);
 
-    if (!justCompleted) {
+    if (justCompleted) {
+      completedSomething = true;
+      saveData(data);
+
+      const embed = new EmbedBuilder()
+        .setTitle("Bingo Tile Completed!")
+        .setDescription(`${CELEB[Math.floor(Math.random()*CELEB.length)]} **${rsn}** completed **${tile.name}** for **${team}**`)
+        .addFields({ name: "Tile Key", value: tile.key, inline: true })
+        .setFooter({ text: "OSRS Bingo" });
+
+      await bingoChannel.send({ embeds: [embed] });
+      await postBoardImage(bingoChannel, team);
+    } else {
+      // Partial progress message
       if (tile.type === "anyCount") {
-        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count}`);
+        await bingoChannel.send(`Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count}`);
       } else if (tile.type === "orCount") {
-        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count} (or ALT)`);
+        if (c.by?.alt) {
+          // alt path completes immediately, but if we’re here it wasn’t alt yet
+        } else {
+          await bingoChannel.send(`Progress (**${team}**): **${tile.name}** — ${c.progress.total}/${tile.count} (or ALT)`);
+        }
       } else if (tile.type === "setAll") {
         const have = Object.keys(c.sets.collected || {}).length;
-        const total = (tile.set || []).length;
-        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — ${have}/${total}`);
+        await bingoChannel.send(`Progress (**${team}**): **${tile.name}** — ${have}/${tile.set.length}`);
       } else if (tile.type === "orSetAll") {
-        const counts = (tile.sets || []).map((setArr, idx) => {
+        const sets = tile.sets || [];
+        const counts = sets.map((setArr, idx) => {
           const got = Object.keys((c.sets && c.sets[idx]) || {}).length;
-          return { got, total: (setArr || []).length };
-        }).sort((a,b)=>b.got-a.got);
-        const best = counts[0] || { got: 0, total: (tile.sets?.[0]?.length || 4) };
-        await bingoChannel?.send(`Progress (**${team}**): **${tile.name}** — best set ${best.got}/${best.total}`);
+          return { got, total: (Array.isArray(setArr) ? setArr.length : 0) };
+        });
+        counts.sort((a,b)=>b.got-a.got);
+        const best = counts[0] || { got: 0, total: (sets[0]?.length || 0) };
+        await bingoChannel.send(`Progress (**${team}**): **${tile.name}** — best set ${best.got}/${best.total}`);
       }
       saveData(data);
-      continue;
     }
-
-    saveData(data);
-    const embed = new EmbedBuilder()
-      .setTitle("Bingo Tile Completed!")
-      .setDescription(`${CELEB[Math.floor(Math.random()*CELEB.length)]} **${rsn}** completed **${tile.name}** for **${team}**`)
-      .addFields({ name: "Tile Key", value: tile.key, inline: true })
-      .setFooter({ text: "OSRS Bingo" });
-
-    await bingoChannel?.send({ embeds: [embed] });
-    await postBoardImage(bingoChannel, team);
   }
 
-  if (!hitAny) {
-    await bingoChannel?.send(`No tile matched **${itemName}** for **${team}**. (If this should match, tweak the tile regex in \`bingo.json\`.)`);
+  if (!matchedAny) {
+    await bingoChannel.send(`No tile matched **${itemName}** for **${team}**. If this should match, tweak its \`matches\`/regex in \`bingo.json\`.`);
   }
 }
+
 
 // --- Start HTTP + Discord ---
 const PORT = process.env.PORT || 3000;
