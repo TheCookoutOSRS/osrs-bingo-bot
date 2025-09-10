@@ -65,11 +65,20 @@
       "matches": ["dragon\\s+claws", "dinh'?s\\s+bulwark", "dragon\\s+hunter\\s+crossbow"]
     },
     {
-      "key": "arax",
-      "name": "Araxyte/Noxious piece",
-      "type": "single",
-      "matches": ["araxyte\\s+fang", "noxious\\s+blade", "noxious\\s+point", "noxious\\s+pommel"]
-    },
+  "key": "arax",
+  "name": "Noxious halberd pieces (any 3) OR Araxyte fang",
+  "type": "orCount",
+  "count": 3,
+  "sources": [
+    "noxious\\s+blade",
+    "noxious\\s+point",
+    "noxious\\s+pommel"
+  ],
+  "alternativeMatches": [
+    "araxyte\\s+fang"
+  ]
+},
+
     {
       "key": "yama",
       "name": "Oathplate or Soulflame horn",
